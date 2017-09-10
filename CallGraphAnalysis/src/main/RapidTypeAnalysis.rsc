@@ -1,10 +1,32 @@
 module main::RapidTypeAnalysis
-
+/*
+*
+*	Contains an implementation of the Rapid Type Analysis algorithm based on the pseudo code of Ben Holland.
+*
+*	RTA = call graph of only methods (no edges)
+*	CHA = class hierachy analysis call graph
+*	W = worklist containing the main method
+*	
+*	while W is not empty
+*	M = next method in W
+*	   T = set of allocated types in M
+*	   T = T union allocated types in RTA callers of M
+*	   for each callsite (C) in M
+*	      if C is a static dispatch
+*	         add an edge to the statically resolved method
+*	      otherwise
+*	         M’ = methods called from M in CHA
+*	         M’ = M’ intersection methods declared in T or supertypes of T
+*	         Add an edge from the method M to each method in M’
+*	         Add each method in M’ to W
+*
+*	Source: https://ben-holland.com/call-graph-construction-algorithms-explained/
+*
+*/
 import Prelude;
 import lang::java::m3::Core;
 import lang::java::m3::AST;
 import lang::java::jdt::m3::Core;
-
 import main::cha::ClassHierarchyAnalysis;
 import main::Util;
 
@@ -26,14 +48,10 @@ public rel[loc,loc] runRtaAnalysis(M3 model, rel[loc,loc] chaGraph)
 
 	if(size(worklist) > 1) 
 	{
-		println("Warning: ");
+		println("Warning: more than one main method found.");
 	}
 
 	println("Worklist contains <size(worklist)> items.");
-	
-	// Create a list of all the static methods in the program
-	// Note that this set does not contain Java's default constructors.
-	set[loc] staticMethods = getStaticMethodsAndConstructors(model);
 	
 	while(!isEmpty(worklist))
 	{
@@ -80,23 +98,3 @@ public rel[loc,loc] runRtaAnalysis(M3 model, rel[loc,loc] chaGraph)
 	}
 	return rtaGraph;
 }
-
-/*
-
-RTA = call graph of only methods (no edges)
-CHA = class hierachy analysis call graph
-W = worklist containing the main method
-
-while W is not empty
-   M = next method in W
-   T = set of allocated types in M
-   T = T union allocated types in RTA callers of M
-   for each callsite (C) in M
-      if C is a static dispatch
-         add an edge to the statically resolved method
-      otherwise
-         M’ = methods called from M in CHA
-         M’ = M’ intersection methods declared in T or supertypes of T
-         Add an edge from the method M to each method in M’
-         Add each method in M’ to W
-*/

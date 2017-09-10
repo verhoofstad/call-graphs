@@ -46,7 +46,7 @@ public void runRta(M3 model)
 
 public void rapidTypeAnalysis(PVG pvg, M3 model) 
 {
-	// As an adaptation of RTA to handle Java the default Object class is added to the set of live classes.
+	// As an adaptation of RTA to handle the Java default Object class is added to the set of live classes.
 	LiveClasses = { JavaObjectClass };
 	LiveFunctions = {};
 	LiveCallSites = {};
@@ -137,7 +137,3 @@ private bool isBaseConstructorCall(CallInstanceEdge i)
 	// a constructor, we'll assume its a base constructor call.
 	return isConstructor(i.callingFunction) && isConstructor(i.targetFunction);
 }
-
-
-
-

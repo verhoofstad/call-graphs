@@ -27,10 +27,8 @@ public set[loc] Methods = {};
 // F does not include interfaces, only functions and methods that have code bodies. Therefore, MD is a subset F.
 public set[loc] Functions = {};
 
-
+// The set of root methods (usually the program's main function).
 public set[loc] RootFunctions = {};
-
-
 
 // S is the set of call site sub-nodes,
 public set[int] CallSiteIds = {};
@@ -39,7 +37,6 @@ public set[int] DirectCallSiteIds = {};
 
 // VirtualCallSites is a subset of CallSites
 public set[int] VirtualCallSiteIds = {};
-
 
 
 public set[DirectCallSite] DirectCallSites = {};
