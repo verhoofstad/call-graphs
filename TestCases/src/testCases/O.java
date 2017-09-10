@@ -1,0 +1,5 @@
+package testCases;
+
+class O {
+
+}

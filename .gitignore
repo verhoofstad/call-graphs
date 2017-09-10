@@ -4,6 +4,9 @@
 .settings
 .classpath
 
+# Binaries
+bin
+
 # Compiled class file
 *.class
 
