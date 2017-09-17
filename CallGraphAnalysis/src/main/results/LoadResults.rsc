@@ -31,14 +31,14 @@ public list[result] LoadResults(loc resultsFile)
 			toInt(parts[3]), // int dependencies, 
 			toInt(parts[4]), // int all_classFileCount,
 			toInt(parts[5]), // int all_classCount,
-			toInt(parts[6]), // int all_interfaceCount,
+			toInt(parts[6]), // int all_interfaceCount,							// Looks like concat of all_publicInterfaceCount and all_packageVisibleInterfaceCount instead of sum.
 			toInt(parts[7]), // int all_publicClassCount,
 			toInt(parts[8]), // int all_packageVisibleClassCount,
 			toInt(parts[9]), // int all_publicInterfaceCount,
 			toInt(parts[10]), // int all_packageVisibleInterfaceCount,
 			toInt(parts[11]), // int project_classFileCount, 
 			toInt(parts[12]), // int project_classCount,
-			toInt(parts[13]), // int project_interfaceCount,
+			toInt(parts[13]), // int project_interfaceCount,					// Looks like concat of project_publicInterfaceCount and project_packageVisibleInterfaceCount instead of sum.
 			toInt(parts[14]), // int project_publicClassCount,
 			toInt(parts[15]), // int project_packageVisibleClassCount,
 			toInt(parts[16]), // int project_publicInterfaceCount,

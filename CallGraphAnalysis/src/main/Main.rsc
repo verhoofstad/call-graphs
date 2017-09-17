@@ -47,19 +47,31 @@ public void testJars()
 	//jreModel = Compose(javaLib);
 	M3 jreModel = m3(|project:///empty|);
 
+	list[str] differences = [];
+
 	for(dataset <- TestDataSet) 
 	{
 		resultSet = resultsOf(results, dataset.organisation,  dataset.name, dataset.revision);
 	
-		testJar(dataset, count, resultSet, jreModel);
+		differences = differences + testJar(dataset, count, resultSet, jreModel);
 		count += 1;
 	}
 
 	endTime = now();
 	runningTime = endTime - startTime;
+	
+	
+	loc differencesFile = |file:///C:/Users/verho/OneDrive/Mijn%20documenten/Master%20Software%20Engineering/Master%20Thesis/Docker/differences.txt|;
+
+	writeFile(differencesFile, "Generated\r\n");
+	
+	for(line <- differences) 
+	{
+		appendToFile(differencesFile, line + "\r\n");
+	}
 }
 
-public void testJar(tuple[str organisation, str name, str revision, loc cpFile, list[loc] libFiles] dataset, int count, result resultSet, M3 jreModel) 
+public list[str] testJar(tuple[str organisation, str name, str revision, loc cpFile, list[loc] libFiles] dataset, int count, result resultSet, M3 jreModel) 
 {
 	println("Processing: <count> with <dataset.organisation> | <dataset.name> | <dataset.revision>");
 	println("");
@@ -79,7 +91,7 @@ public void testJar(tuple[str organisation, str name, str revision, loc cpFile, 
 	//libModel = composeM3(|project://merged|, { model, jreModel });
 	M3 libModel = m3(|project:///empty|);
 	
-	compareM3(cpModel, libModel, resultSet);
+	differences = compareM3(cpModel, libModel, resultSet);
 	
 	//validateM3(cpModel);
 
@@ -89,6 +101,8 @@ public void testJar(tuple[str organisation, str name, str revision, loc cpFile, 
 	
 	//println("Declarations: <size(model.declarations)>, duration <libRunningTime[3]>:<libRunningTime[4]>:<libRunningTime[5]>");
 	//println("Classes: <size(classes(model))>, Interfaces: <size(interfaces(model))>");
+	
+	return differences;
 }
 
 
@@ -115,7 +129,7 @@ public M3 Compose(set[loc] jarFiles)
 }
 
 
-public void compareM3(M3 cpModel, M3 libModel, result resultSet) 
+public list[str] compareM3(M3 cpModel, M3 libModel, result resultSet) 
 {
 	int project_classCount = size(classes(cpModel));
 	int project_interfaceCount = size(interfaces(cpModel));
@@ -130,19 +144,70 @@ public void compareM3(M3 cpModel, M3 libModel, result resultSet)
 	int project_privateMethods = size( { me | <me,m> <- cpModel.modifiers, isMethod(me) && m == \private() } );
 	int project_packagePrivateMethods = project_methodCount - project_publicMethods - project_protectedMethods - project_privateMethods;
 
-
 	println("");
 	println("	Project class count:                     <project_classCount>, <resultSet.project_classCount>"); 
-	println("	Project interface count:                 <project_interfaceCount>, <resultSet.project_interfaceCount>"); 
 	println("	Project public class count:              <project_publicClassCount>, <resultSet.project_publicClassCount>"); 
 	println("	Project package visible count:           <project_packageVisibleClassCount>, <resultSet.project_packageVisibleClassCount>"); 
+	println("");
+	println("	Project interface count:                 <project_interfaceCount>, <resultSet.project_interfaceCount>"); 
 	println("	Project public interface count:          <project_publicInterfaceCount>, <resultSet.project_publicInterfaceCount>"); 
 	println("	Project package visible interface count: <project_packageVisibleInterfaceCount>, <resultSet.project_packageVisibleInterfaceCount>"); 
+	println("");
 	println("	Project method count:                    <project_methodCount>, <resultSet.project_methodCount>"); 
 	println("	Project public method count:             <project_publicMethods>, <resultSet.project_publicMethods>"); 
 	println("	Project protected method count:          <project_protectedMethods>, <resultSet.project_protectedMethods>"); 
 	println("	Project package private method count:    <project_packagePrivateMethods>, <resultSet.project_packagePrivateMethods>"); 
-	println("	Project private method count:            <project_privateMethods>, <resultSet.project_privateMethods>"); 
+	println("	Project private method count:            <project_privateMethods>, <resultSet.project_privateMethods>");
+	
+	
+	list[str] differences = [];
+	
+	if( project_classCount != resultSet.project_classCount
+		|| project_publicClassCount != resultSet.project_publicClassCount
+		|| project_packageVisibleClassCount != resultSet.project_packageVisibleClassCount
+		|| project_publicInterfaceCount != resultSet.project_publicInterfaceCount
+		|| project_packageVisibleInterfaceCount != resultSet.project_packageVisibleInterfaceCount
+		|| project_methodCount != resultSet.project_methodCount
+		|| project_publicMethods != resultSet.project_publicMethods
+		|| project_protectedMethods != resultSet.project_protectedMethods 
+		|| project_packagePrivateMethods != resultSet.project_packagePrivateMethods 
+		|| project_privateMethods != resultSet.project_privateMethods) 
+	{
+		differences += "Differences detected in <cpModel.id>";
+	
+		if(project_classCount != resultSet.project_classCount) {
+			differences += "	Project class count:                     <project_classCount>, <resultSet.project_classCount>";
+		}
+		if(project_publicClassCount != resultSet.project_publicClassCount) {
+			differences += "	Project pulic class count:               <project_publicClassCount>, <resultSet.project_publicClassCount>";
+		}
+		if(project_packageVisibleClassCount != resultSet.project_packageVisibleClassCount) {
+			differences += "	Project package visible class count:     <project_packageVisibleClassCount>, <resultSet.project_packageVisibleClassCount>";
+		}
+		if(project_publicInterfaceCount != resultSet.project_publicInterfaceCount) {
+			differences += "	Project pulic interface count:           <project_publicInterfaceCount>, <resultSet.project_publicInterfaceCount>";
+		}
+		if(project_packageVisibleInterfaceCount != resultSet.project_packageVisibleInterfaceCount) {
+			differences += "	Project package visible interface count: <project_packageVisibleInterfaceCount>, <resultSet.project_packageVisibleInterfaceCount>";
+		}
+		if(project_methodCount != resultSet.project_methodCount) {
+			differences += "	Project method count:                    <project_methodCount>, <resultSet.project_methodCount>";
+		}
+		if(project_publicMethods != resultSet.project_publicMethods) {
+			differences += "	Project public method count:             <project_publicMethods>, <resultSet.project_publicMethods>";
+		}
+		if(project_protectedMethods != resultSet.project_protectedMethods) {
+			differences += "	Project protected method count:          <project_protectedMethods>, <resultSet.project_protectedMethods>";
+		}
+		if(project_packagePrivateMethods != resultSet.project_packagePrivateMethods) {
+			differences += "	Project pacakage private method count:   <project_packagePrivateMethods>, <resultSet.project_packagePrivateMethods>";
+		}
+		if(project_privateMethods != resultSet.project_privateMethods) {
+			differences += "	Project private method count:            <project_privateMethods>, <resultSet.project_privateMethods>";
+		}
+	} else{
+		differences += "File <cpModel.id> has no differences.";
+	}
 	
 	
 	/*
@@ -170,6 +235,8 @@ public void compareM3(M3 cpModel, M3 libModel, result resultSet)
 	int libraries_packagePrivateMethods,
 	int libraries_privateMethods,
 	*/
+	
+	return differences;
 } 
 
 public void validateM3(M3 model) 
