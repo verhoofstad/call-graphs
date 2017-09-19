@@ -13,28 +13,6 @@ import main::cha::ClassHierarchyAnalysis;
 import main::results::ResultSet;
 import main::results::LoadResults;
 
-public void runAnalysis()
-{
-	M3 model = createM3FromEclipseProject(|project://TestCases|);
-	
-	rel[loc,loc] raGraph = runRaAnalysis(model);
-	rel[loc,loc] chaGraph = runChaAnalysis(model);
-	rel[loc,loc] rtaGraph = runRtaAnalysis(model);
-
-
-	printReport(raGraph);
-	printReport(chaGraph);
-}
-
-public void printReport(rel[loc,loc] callGraph)
-{
-	println("Nr of nodes: <size(carrier(callGraph))>");
-	println("Nr of edges: <size(callGraph)>");
-	
-	//println("<callGraph>");
-}
-
-
 public void testJars() 
 {
 	startTime = now();
@@ -132,9 +110,15 @@ public M3 Compose(set[loc] jarFiles)
 public list[str] compareM3(M3 cpModel, M3 libModel, result resultSet) 
 {
 	int project_classCount = size(classes(cpModel));
-	int project_interfaceCount = size(interfaces(cpModel));
 	int project_publicClassCount = size( { c | <c,m> <- cpModel.modifiers, isClass(c) && m == \public() } );
 	int project_packageVisibleClassCount = project_classCount - project_publicClassCount;
+	int project_anonymousClassCount = size({ c | <c,_> <- cpModel.declarations, c.scheme == "java+anonymousClass" });
+
+	int project_enumCount = size(enums(cpModel));
+	int project_publicEnumCount = size( { e | <e,m> <- cpModel.modifiers, isEnum(e) && m == \public() } );
+	int project_packageVisibleEnumCount = project_enumCount - project_publicEnumCount;
+
+	int project_interfaceCount = size(interfaces(cpModel));
 	int project_publicInterfaceCount = size( { i | <i,m> <- cpModel.modifiers, isInterface(i) && m == \public() } );
 	int project_packageVisibleInterfaceCount = project_interfaceCount - project_publicInterfaceCount;
 
@@ -147,7 +131,9 @@ public list[str] compareM3(M3 cpModel, M3 libModel, result resultSet)
 	println("");
 	println("	Project class count:                     <project_classCount>, <resultSet.project_classCount>"); 
 	println("	Project public class count:              <project_publicClassCount>, <resultSet.project_publicClassCount>"); 
-	println("	Project package visible count:           <project_packageVisibleClassCount>, <resultSet.project_packageVisibleClassCount>"); 
+	println("	Project package visible count:           <project_packageVisibleClassCount>, <resultSet.project_packageVisibleClassCount>");
+	println("	Project anonymous class count:           <project_anonymousClassCount>");
+	println("	Project enum count:                      <project_enumCount>"); 
 	println("");
 	println("	Project interface count:                 <project_interfaceCount>, <resultSet.project_interfaceCount>"); 
 	println("	Project public interface count:          <project_publicInterfaceCount>, <resultSet.project_publicInterfaceCount>"); 
@@ -161,51 +147,48 @@ public list[str] compareM3(M3 cpModel, M3 libModel, result resultSet)
 	
 	
 	list[str] differences = [];
+	bool differencesDetected = false;
+	
+	// In the Evaluation container enums are counted as classes.
+	project_classCount += project_enumCount;
+	project_publicClassCount += project_publicEnumCount;
+	project_packageVisibleClassCount += project_packageVisibleEnumCount;
 	
 	if( project_classCount != resultSet.project_classCount
 		|| project_publicClassCount != resultSet.project_publicClassCount
 		|| project_packageVisibleClassCount != resultSet.project_packageVisibleClassCount
 		|| project_publicInterfaceCount != resultSet.project_publicInterfaceCount
-		|| project_packageVisibleInterfaceCount != resultSet.project_packageVisibleInterfaceCount
-		|| project_methodCount != resultSet.project_methodCount
+		|| project_packageVisibleInterfaceCount != resultSet.project_packageVisibleInterfaceCount)
+	{
+		differences += "Class/Interfaces differences detected in <cpModel.id>";
+	
+		differences += "	Project class count:                     <project_classCount>, <resultSet.project_classCount>";
+		differences += "	Project pulic class count:               <project_publicClassCount>, <resultSet.project_publicClassCount>";
+		differences += "	Project package visible class count:     <project_packageVisibleClassCount>, <resultSet.project_packageVisibleClassCount>";
+		differences += "	Project anonymous class count:           <project_anonymousClassCount>";
+		differences += "	Project enum count:                      <project_enumCount>";
+		differences += "	Project pulic interface count:           <project_publicInterfaceCount>, <resultSet.project_publicInterfaceCount>";
+		differences += "	Project package visible interface count: <project_packageVisibleInterfaceCount>, <resultSet.project_packageVisibleInterfaceCount>";
+		differencesDetected  = true;
+	} 
+
+	if( project_methodCount != resultSet.project_methodCount
 		|| project_publicMethods != resultSet.project_publicMethods
 		|| project_protectedMethods != resultSet.project_protectedMethods 
 		|| project_packagePrivateMethods != resultSet.project_packagePrivateMethods 
 		|| project_privateMethods != resultSet.project_privateMethods) 
 	{
-		differences += "Differences detected in <cpModel.id>";
-	
-		if(project_classCount != resultSet.project_classCount) {
-			differences += "	Project class count:                     <project_classCount>, <resultSet.project_classCount>";
-		}
-		if(project_publicClassCount != resultSet.project_publicClassCount) {
-			differences += "	Project pulic class count:               <project_publicClassCount>, <resultSet.project_publicClassCount>";
-		}
-		if(project_packageVisibleClassCount != resultSet.project_packageVisibleClassCount) {
-			differences += "	Project package visible class count:     <project_packageVisibleClassCount>, <resultSet.project_packageVisibleClassCount>";
-		}
-		if(project_publicInterfaceCount != resultSet.project_publicInterfaceCount) {
-			differences += "	Project pulic interface count:           <project_publicInterfaceCount>, <resultSet.project_publicInterfaceCount>";
-		}
-		if(project_packageVisibleInterfaceCount != resultSet.project_packageVisibleInterfaceCount) {
-			differences += "	Project package visible interface count: <project_packageVisibleInterfaceCount>, <resultSet.project_packageVisibleInterfaceCount>";
-		}
-		if(project_methodCount != resultSet.project_methodCount) {
-			differences += "	Project method count:                    <project_methodCount>, <resultSet.project_methodCount>";
-		}
-		if(project_publicMethods != resultSet.project_publicMethods) {
-			differences += "	Project public method count:             <project_publicMethods>, <resultSet.project_publicMethods>";
-		}
-		if(project_protectedMethods != resultSet.project_protectedMethods) {
-			differences += "	Project protected method count:          <project_protectedMethods>, <resultSet.project_protectedMethods>";
-		}
-		if(project_packagePrivateMethods != resultSet.project_packagePrivateMethods) {
-			differences += "	Project pacakage private method count:   <project_packagePrivateMethods>, <resultSet.project_packagePrivateMethods>";
-		}
-		if(project_privateMethods != resultSet.project_privateMethods) {
-			differences += "	Project private method count:            <project_privateMethods>, <resultSet.project_privateMethods>";
-		}
-	} else{
+		differences += "Method differences detected in <cpModel.id>";
+		differences += "	Project method count:                    <project_methodCount>, <resultSet.project_methodCount>		<project_methodCount - resultSet.project_methodCount>";
+		differences += "	Project public method count:             <project_publicMethods>, <resultSet.project_publicMethods>	<project_publicMethods - >";
+		differences += "	Project protected method count:          <project_protectedMethods>, <resultSet.project_protectedMethods>";
+		differences += "	Project pacakage private method count:   <project_packagePrivateMethods>, <resultSet.project_packagePrivateMethods>";
+		differences += "	Project private method count:            <project_privateMethods>, <resultSet.project_privateMethods>";
+		differencesDetected  = true;
+	}
+
+	if(!differencesDetected)
+	{
 		differences += "File <cpModel.id> has no differences.";
 	}
 	
