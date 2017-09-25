@@ -13,98 +13,148 @@ import main::cha::ClassHierarchyAnalysis;
 import main::results::ResultSet;
 import main::results::LoadResults;
 
-public void testJars() 
+
+// Environmental settings
+public loc libraryFolder = |file:///C:/CallGraphData/Libraries|;
+public loc jdkFolder = |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64|;
+public loc resultsFile = |file:///C:/CallGraphData/results.txt|;
+public loc differencesFile = |file:///C:/CallGraphData/differences.txt|;
+
+
+public void analyseJars() 
+{
+	analyseJars([0..99]);
+}
+
+
+public void analyseJars(list[int] libraryIdentifiers) 
 {
 	startTime = now();
-	int count = 0;
 
-	println("Load results file");	
+	print("Loading results file...");	
 	results = LoadResults(resultsFile);
+	println("Ok");
 	
-	//println("Load Java Libraries...");	
-	//jreModel = Compose(javaLib);
-	M3 jreModel = m3(|project:///empty|);
+	print("Loading Java JDK Libraries...");	
+	jdkModel = createM3FromLocation(jdkFolder);
+	println("Ok");
+	println();
 
 	list[str] differences = [];
 
-	for(dataset <- TestDataSet) 
+	for(library <- TestDataSet, library.id in libraryIdentifiers) 
 	{
-		resultSet = resultsOf(results, dataset.organisation,  dataset.name, dataset.revision);
+		resultSet = resultsOf(results, library.organisation,  library.name, library.revision);
 	
-		differences = differences + testJar(dataset, count, resultSet, jreModel);
-		count += 1;
+		differences = differences + analyseJar(library, resultSet, jdkModel);
 	}
 
-	endTime = now();
-	runningTime = endTime - startTime;
+	runningTime = now() - startTime;
 	
-	
-	loc differencesFile = |file:///C:/Users/verho/OneDrive/Mijn%20documenten/Master%20Software%20Engineering/Master%20Thesis/Docker/differences.txt|;
-
-	writeFile(differencesFile, "Generated\r\n");
+	writeFile(differencesFile, "Generated on <now()>\r\n");
 	
 	for(line <- differences) 
 	{
 		appendToFile(differencesFile, line + "\r\n");
 	}
+	
+	println("");
+	println("Total running time: <formatDuration(runningTime)>");
 }
 
-public list[str] testJar(tuple[str organisation, str name, str revision, loc cpFile, list[loc] libFiles] dataset, int count, result resultSet, M3 jreModel) 
+public list[str] analyseJar(Library library, result resultSet, M3 jdkModel) 
 {
-	println("Processing: <count> with <dataset.organisation> | <dataset.name> | <dataset.revision>");
+	println("Processing: <library.id> with <library.organisation> | <library.name> | <library.revision>");
 	println("");
-	println("CPFILE: <dataset.cpFile>");
-	println("LibFiles: <dataset.libFiles[0]>");
+	println("CPFILE: <library.cpFile>");
+	println("LibFiles: <library.libFiles[0]>");
 
-	for(libFile <- tail(dataset.libFiles)) 
+	for(libFile <- tail(library.libFiles)) 
 	{
 		println("  <libFile>");
 	}
+	println("");
 
-	libStartTime = now();
+	startTime = now();
 	
-	cpModel = createM3FromJar(dataset.cpFile);
+	print("    Loading CPFILE...");
+	cpModel = createM3FromLocation(libraryFolder + library.cpFile);
+	println("Ok");
 
-	//libModel = Compose(toSet(dataset.libFiles));
-	//libModel = composeM3(|project://merged|, { model, jreModel });
-	M3 libModel = m3(|project:///empty|);
+	print("    Loading LibFiles...");
+	libModel = createM3FromJars(|project://libModel|, [ libraryFolder + libFile | libFile <- library.libFiles, libFile != "java-8-openjdk-amd64/jre/lib/" ]);
+	println("Ok");
+
+	print("    Merging Libraries model with JDK model...");
+	libModel = composeM3(|project://libModel|, { libModel, jdkModel });
+	println("Ok");
 	
 	differences = compareM3(cpModel, libModel, resultSet);
 	
 	//validateM3(cpModel);
 
-	libEndTime = now();
-	libRunningTime = libEndTime - libStartTime;
-	println("");
+	runningTime = now() - startTime;
 	
-	//println("Declarations: <size(model.declarations)>, duration <libRunningTime[3]>:<libRunningTime[4]>:<libRunningTime[5]>");
-	//println("Classes: <size(classes(model))>, Interfaces: <size(interfaces(model))>");
+	println("");
+	println("    Library running time: <formatDuration(runningTime)>");
 	
 	return differences;
 }
 
-
-public M3 Compose(tuple[str organisation, str name, str revision, loc cpFile, list[loc] libFiles] dataset) 
+public M3 createM3FromLocation(loc location) 
 {
-	return Compose(dataset.cpFile, toSet(dataset.libFiles));
-}
-
-public M3 Compose(loc cpFile, set[loc] libFiles) 
-{
-	return Compose({cpFile} + libFiles - javaLibraries);
-}
-
-public M3 Compose(set[loc] jarFiles) 
-{
-	set[M3] models = {};
-	
-	for(jarFile <- jarFiles)
+	if(isDirectory(location)) 
 	{
-		models += createM3FromJar(jarFile);
+		 return createM3FromJars(location, findJars(location));
 	}
-
-	return composeM3(|project://merged|, models);	
+	return createM3FromJar(location);
 }
+
+public M3 createM3FromJars(loc modelId, list[loc] jarFiles) 
+{
+	set[M3] models = { createM3FromJar(jar) | jar <- jarFiles };
+	
+	return composeM3(modelId, models);
+}
+
+public list[loc] findJars(loc location)
+{
+	list[loc] files = [ location + entry | entry <- listEntries(location) ];
+	list[loc] jars = [ entry | entry <- files, entry.extension == "jar" ];
+
+	for(file <- files) 
+	{
+		if(isDirectory(file)) 
+		{
+			jars = jars + findJars(file);
+		}
+	}
+	return jars;
+}
+
+public str formatDuration(Duration duration) 
+{
+	str output = "";
+	if(duration.hours < 10) 
+	{
+		output += "0";
+	}
+	output += "<duration.hours>:";
+
+	if(duration.minutes < 10) 
+	{
+		output += "0";
+	}
+	output += "<duration.minutes>:";
+
+	if(duration.seconds < 10) 
+	{
+		output += "0";
+	}
+	output += "<duration.seconds>";
+	return output;
+}
+
 
 
 public list[str] compareM3(M3 cpModel, M3 libModel, result resultSet) 
@@ -128,23 +178,49 @@ public list[str] compareM3(M3 cpModel, M3 libModel, result resultSet)
 	int project_privateMethods = size( { me | <me,m> <- cpModel.modifiers, isMethod(me) && m == \private() } );
 	int project_packagePrivateMethods = project_methodCount - project_publicMethods - project_protectedMethods - project_privateMethods;
 
-	println("");
+	int libraries_classCount = size(classes(libModel));
+	int libraries_publicClassCount = size( { c | <c,m> <- libModel.modifiers, isClass(c) && m == \public() } );
+	int libraries_packageVisibleClassCount = libraries_classCount - libraries_publicClassCount;
+	int libraries_anonymousClassCount = size({ c | <c,_> <- libModel.declarations, c.scheme == "java+anonymousClass" });
+
+	int libraries_enumCount = size(enums(libModel));
+	int libraries_publicEnumCount = size( { e | <e,m> <- libModel.modifiers, isEnum(e) && m == \public() } );
+	int libraries_packageVisibleEnumCount = libraries_enumCount - libraries_publicEnumCount;
+
+	int libraries_interfaceCount = size(interfaces(libModel));
+	int libraries_publicInterfaceCount = size( { i | <i,m> <- libModel.modifiers, isInterface(i) && m == \public() } );
+	int libraries_packageVisibleInterfaceCount = libraries_interfaceCount - libraries_publicInterfaceCount;
+
+	// Compensate for bug in Docker code.
+	resultSet.project_interfaceCount  = resultSet.project_publicInterfaceCount + resultSet.project_packageVisibleInterfaceCount;
+	resultSet.libraries_interfaceCount = resultSet.libraries_publicInterfaceCount + resultSet.libraries_packageVisibleInterfaceCount;
+
+
+	println();
 	println("	Project class count:                     <project_classCount>, <resultSet.project_classCount>"); 
 	println("	Project public class count:              <project_publicClassCount>, <resultSet.project_publicClassCount>"); 
 	println("	Project package visible count:           <project_packageVisibleClassCount>, <resultSet.project_packageVisibleClassCount>");
 	println("	Project anonymous class count:           <project_anonymousClassCount>");
 	println("	Project enum count:                      <project_enumCount>"); 
-	println("");
+	println();
 	println("	Project interface count:                 <project_interfaceCount>, <resultSet.project_interfaceCount>"); 
 	println("	Project public interface count:          <project_publicInterfaceCount>, <resultSet.project_publicInterfaceCount>"); 
 	println("	Project package visible interface count: <project_packageVisibleInterfaceCount>, <resultSet.project_packageVisibleInterfaceCount>"); 
-	println("");
+	println();
 	println("	Project method count:                    <project_methodCount>, <resultSet.project_methodCount>"); 
 	println("	Project public method count:             <project_publicMethods>, <resultSet.project_publicMethods>"); 
 	println("	Project protected method count:          <project_protectedMethods>, <resultSet.project_protectedMethods>"); 
 	println("	Project package private method count:    <project_packagePrivateMethods>, <resultSet.project_packagePrivateMethods>"); 
 	println("	Project private method count:            <project_privateMethods>, <resultSet.project_privateMethods>");
-	
+	println();
+	println("	Libraries class count:                   <libraries_classCount + libraries_enumCount>, <resultSet.libraries_classCount>"); 
+	println("	Libraries public class count:            <libraries_publicClassCount + libraries_publicEnumCount>, <resultSet.libraries_publicClassCount>"); 
+	println("	Libraries package visible count:         <libraries_packageVisibleClassCount + libraries_packageVisibleEnumCount>, <resultSet.libraries_packageVisibleClassCount>");
+	println("	Libraries anonymous class count:         <libraries_anonymousClassCount>");
+	println();
+	println("	Libraries interface count:               <libraries_interfaceCount>, <resultSet.libraries_interfaceCount>"); 
+	println("	Libraries public interface count:        <libraries_publicInterfaceCount>, <resultSet.libraries_publicInterfaceCount>"); 
+	println("	Libraries package visible interface count: <libraries_packageVisibleInterfaceCount>, <resultSet.libraries_packageVisibleInterfaceCount>"); 
 	
 	list[str] differences = [];
 	bool differencesDetected = false;
@@ -180,7 +256,7 @@ public list[str] compareM3(M3 cpModel, M3 libModel, result resultSet)
 	{
 		differences += "Method differences detected in <cpModel.id>";
 		differences += "	Project method count:                    <project_methodCount>, <resultSet.project_methodCount>		<project_methodCount - resultSet.project_methodCount>";
-		differences += "	Project public method count:             <project_publicMethods>, <resultSet.project_publicMethods>	<project_publicMethods - >";
+		differences += "	Project public method count:             <project_publicMethods>, <resultSet.project_publicMethods>	<project_publicMethods - resultSet.project_publicMethods>";
 		differences += "	Project protected method count:          <project_protectedMethods>, <resultSet.project_protectedMethods>";
 		differences += "	Project pacakage private method count:   <project_packagePrivateMethods>, <resultSet.project_packagePrivateMethods>";
 		differences += "	Project private method count:            <project_privateMethods>, <resultSet.project_privateMethods>";

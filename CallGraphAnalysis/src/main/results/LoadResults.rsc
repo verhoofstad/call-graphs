@@ -6,8 +6,8 @@ import String;
 import IO;
 
 
-//public loc resultsFile = |file:///C:/Users/verho/OneDrive/Mijn%20documenten/Master%20Software%20Engineering/Master%20Thesis/Docker/results.txt|;
-public loc resultsFile = |file:///C:/Users/Erik/OneDrive/Mijn%20documenten/Master%20Software%20Engineering/Master%20Thesis/Docker/results.txt|;
+public loc resultsFile = |file:///C:/Users/verho/OneDrive/Mijn%20documenten/Master%20Software%20Engineering/Master%20Thesis/Docker/results.txt|;
+//public loc resultsFile = |file:///C:/Users/Erik/OneDrive/Mijn%20documenten/Master%20Software%20Engineering/Master%20Thesis/Docker/results.txt|;
 
 public result resultsOf(list[result] results, str organisation, str name, str revision) 
 {
