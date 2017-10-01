@@ -16,7 +16,7 @@ import main::M3Extensions;
 */
 public list[loc] getCallSites(loc method, M3 model)
 {
-	return [ x | <m,x> <- model@methodInvocation, m == method ]; 
+	return [ x | <m,x> <- model.methodInvocation, m == method ]; 
 }
 
 /**
@@ -24,7 +24,7 @@ public list[loc] getCallSites(loc method, M3 model)
 */
 public set[loc] getStaticMethods(M3 model) 
 {
-	return { m | <m, modifier> <- model@modifiers, modifier == static() && m.scheme == "java+method" };
+	return { m | <m, modifier> <- model.modifiers, modifier == static() && m.scheme == "java+method" };
 }
 
 public set[loc] getStaticMethodsAndConstructors(M3 model)
@@ -38,7 +38,7 @@ public set[loc] getStaticMethodsAndConstructors(M3 model)
 */
 public bool isStatic(loc method, M3 model) 
 {
-	return <method, static()> in model@modifiers
+	return <method, static()> in model.modifiers
 		|| method.scheme == "java+constructor";
 }
 
@@ -47,7 +47,7 @@ public bool isStatic(loc method, M3 model)
 */
 public bool isProtected(loc method, M3 model) 
 {
-	return <method, protected()> in model@modifiers;
+	return <method, protected()> in model.modifiers;
 }
 
 /**
@@ -55,7 +55,7 @@ public bool isProtected(loc method, M3 model)
 */
 public bool isPublic(loc method, M3 model) 
 {
-	return <method, \public()> in model@modifiers;
+	return <method, \public()> in model.modifiers;
 }
 
 /**
@@ -63,7 +63,7 @@ public bool isPublic(loc method, M3 model)
 */
 public bool isPrivate(loc method, M3 model) 
 {
-	return <method,\private()> in model@modifiers;
+	return <method,\private()> in model.modifiers;
 }
 
 /*
@@ -71,7 +71,7 @@ public bool isPrivate(loc method, M3 model)
 *
 public rel[loc,loc] getClassInheritance(M3 model)
 {
-	return model@extends + model@implements;
+	return model.extends + model.implements;
 }
 */
 
@@ -82,13 +82,13 @@ public loc classOf(loc method, M3 model)
 	
 
 	// Note here that a method can be:
-	// - a default contructor (not present in model@containment)
+	// - a default contructor (not present in model.containment)
 	// - a constructor of an anonymous class which is default by definition
 	//   From the Java Language Specification, section 15.9.5.1: An anonymous class cannot have an explicitly declared constructor.
-	//   Thus also not present in model@containment
+	//   Thus also not present in model.containment
 	// - a constructor or method from an external class 
 	
-	classe = [ class | <class,y> <- model@containment, y == method ];
+	classe = [ class | <class,y> <- model.containment, y == method ];
 	
 	if(size(classe) == 1) 
 	{
@@ -106,7 +106,7 @@ public loc classOf(loc method, M3 model)
 
 public bool isSubTypeOf(loc subType, loc superType, M3 model) 
 {
-	return <subType, superType> in model@typeDependency+;
+	return <subType, superType> in model.typeDependency+;
 }
 
 /**
@@ -114,7 +114,7 @@ public bool isSubTypeOf(loc subType, loc superType, M3 model)
 */
 public set[loc] subClassesOf(M3 model, loc class) 
 {
-	return { x | <x,y> <- model@typeDependency+, x.scheme == "java+class" && y == class };
+	return { x | <x,y> <- model.typeDependency+, x.scheme == "java+class" && y == class };
 }
 
 public set[loc] getConeClassSet(M3 model, loc class)
@@ -133,7 +133,7 @@ public set[loc] getConeClassSet(M3 model, loc class)
 */
 public str getMethodName(M3 model, loc method) 
 {
-	return [ name | <name, m> <- model@names, m == method ][0];
+	return [ name | <name, m> <- model.names, m == method ][0];
 }
 
 /**
@@ -142,14 +142,14 @@ public str getMethodName(M3 model, loc method)
 public set[loc] findMainMethods(M3 model) 
 {
 	// Select all methods with the name 'main'.
-	set[loc] mainMethods = { method | <name,method> <- model@names, name == "main" && method.scheme == "java+method" };
+	set[loc] mainMethods = { method | <name,method> <- model.names, name == "main" && method.scheme == "java+method" };
 	
 	// Select methods that are both public and static.
-	mainMethods = mainMethods & { method | <method,modifier> <- model@modifiers, modifier == static() };
-	mainMethods = mainMethods & { method | <method,modifier> <- model@modifiers, modifier == \public() };
+	mainMethods = mainMethods & { method | <method,modifier> <- model.modifiers, modifier == static() };
+	mainMethods = mainMethods & { method | <method,modifier> <- model.modifiers, modifier == \public() };
 	
 	// Select methods...
-	mainMethods = { method | <method,typeSymbol> <- model@types, method in mainMethods
+	mainMethods = { method | <method,typeSymbol> <- model.types, method in mainMethods
 		&& typeSymbol.returnType == TypeSymbol::\void() // ...that have no return type (i.e. are void)
 		&& size(typeSymbol.parameters) == 1 // ... take exactly 1 parameter 
 		&& typeSymbol.parameters[0] == TypeSymbol::\array(TypeSymbol::\class(|java+class:///java/lang/String|, []), 1) // ...that is of type String[]. 
@@ -162,7 +162,7 @@ public set[loc] findMainMethods(M3 model)
 
 public set[loc] allocatedTypesIn(loc method, M3 model) 
 {
-	invokedConstructors = { c | <m,c> <- model@methodInvocation, m == method && isConstructor(c) };
+	invokedConstructors = { c | <m,c> <- model.methodInvocation, m == method && isConstructor(c) };
 	
 	return { classOf(constructor, model) | constructor <- invokedConstructors };
 }
@@ -170,7 +170,7 @@ public set[loc] allocatedTypesIn(loc method, M3 model)
 
 public set[loc] allocatedTypesIn(set[loc] methods, M3 model) 
 {
-	invokedConstructors = { c | <m,c> <- model@methodInvocation, m in methods && isConstructor(c) };
+	invokedConstructors = { c | <m,c> <- model.methodInvocation, m in methods && isConstructor(c) };
 	
 	return { classOf(constructor, model) | constructor <- invokedConstructors };
 }
@@ -188,7 +188,7 @@ public set[loc] superTypesOf(set[loc] classes, M3 model)
 
 public set[loc] methodsOf(set[loc] classes, M3 model)
 {
-	return { y | <x,y> <- model@containment, x in classes && y.scheme == "java+method" };
+	return { y | <x,y> <- model.containment, x in classes && y.scheme == "java+method" };
 }
 
 data MethodSignature = methodSignature(str name, list[TypeSymbol] typeParameters, TypeSymbol returnType, list[TypeSymbol] parameters)
@@ -197,11 +197,11 @@ data MethodSignature = methodSignature(str name, list[TypeSymbol] typeParameters
 
 public MethodSignature signatureOf(loc method, M3 model) 
 {
-	 list[TypeSymbol] typeSymbols = [ ts | <m,ts> <- model@types, m == method ];
+	 list[TypeSymbol] typeSymbols = [ ts | <m,ts> <- model.types, m == method ];
 	 
 	 if(size(typeSymbols) == 1) 
 	 {
-		 str name = [ name | <name, m> <- model@names, m == method ][0];
+		 str name = [ name | <name, m> <- model.names, m == method ][0];
 		 
 		 if(isConstructor(method)) {
 		 	return constructorSignature(name, typeSymbols[0].parameters);

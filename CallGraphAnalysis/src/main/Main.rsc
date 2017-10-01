@@ -306,6 +306,12 @@ public void validateM3(M3 model)
 	notDeclared = carrier(model.methodInvocation) - domain(model.declarations);
 	println("Undeclared method invocations: <size(notDeclared)>");
 	
+	notDeclared = { replaceAll(m.uri, "$", "/") | m <- carrier(model.methodInvocation) } - { replaceAll(m.uri, "$", "/" ) | m <- domain(model.declarations) };
+	println("Undeclared method invocations when ignoring $ sign: <size(notDeclared)>");
+	
+	notDeclared = domain(model.modifiers) - domain(model.declarations);
+	println("Undeclared element in modifiers: <size(notDeclared)>");
+	
 	notDeclared = carrier(model.extends) - domain(model.declarations);
 	println("Undeclared extends:            <size(notDeclared)>");
 

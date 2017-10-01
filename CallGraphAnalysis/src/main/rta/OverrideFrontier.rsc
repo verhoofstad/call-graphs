@@ -11,26 +11,11 @@ import main::Util;
 import main::rta::Sets;
 import main::rta::ClassHierarchyGraph;
 
-
 // Contains per visible method the set of Visible Methods that override 'v'. 
 public map[VisibleMethod, set[VisibleMethod]] Override = ();
 
 // Contains per visible method the set of Classes that inherit 'v'. (cone set)
 public map[VisibleMethod, set[loc]] Inherit = ();
-
-
-public void buildFrontier(M3 model) 
-{
-	CHG chg = buildCHG(model);
-
-	buildFrontier(chg, model);	
-}
-
-
-public void buildFrontier(CHG chg, M3 model) 
-{
-	buildFrontier(chg.classes, chg.derivations, chg.visibleMethods, model);
-}
 
 
 public void buildFrontier(set[loc] classes, rel[loc,loc] derivations, set[VisibleMethod] visibleMethods, M3 model) 
@@ -56,21 +41,15 @@ public void buildFrontier(set[loc] classes, rel[loc,loc] derivations, set[Visibl
 	for(c <- reversedTopologicalOrder) 
 	{
 		// For each visible method of 'c'.
-		for(<m,d> <- [ <method,derived> | <base,method,derived> <- visibleMethods, base == c])
+		for(<c,m,d> <- visibleMethods)
 		{
 			VisibleMethod v = <c,m,d>;
-			
-			// For each parent class of 'c'.
-			for(b <- [ base | <base,derived> <- derivations, derived == c ]) 
-			{
-				
-				list[tuple[loc method,loc derived]] identicalMethods = [ <method,derived> | <base,method,derived> <- visibleMethods, base == b && identicalSignature(m, method, model) ]; 
-			
-				if(size(identicalMethods) > 0) 
+
+			// For each superclass of 'c'.
+			for(<b,c> <- derivations) 
+			{			
+				if(any(<b,n,e> <- visibleMethods && identicalSignature(m, n, model))) 
 				{
-					n = identicalMethods[0].method;
-					e = identicalMethods[0].derived;
-				
 					VisibleMethod w = <b,n,e>;
 					if(d == e) 
 					{
@@ -82,7 +61,7 @@ public void buildFrontier(set[loc] classes, rel[loc,loc] derivations, set[Visibl
 						Override[w] += { v };
 						if(c != d) 
 						{
-							for(p <- [ base | <base,derived> <- derivations, derived == c && <base,m,d> in visibleMethods ]) 
+							for(<p,c> <- derivations, <p,m,d> in visibleMethods) 
 							{
 								antiset[<p,m,d>] += { v };
 							}

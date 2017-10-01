@@ -1,11 +1,54 @@
 module main::rta::Util
 
 import Prelude;
+import lang::java::m3::Core;
 import analysis::graphs::Graph;
 
 import main::rta::Sets;
 import main::rta::ClassHierarchyGraph;
+import main::rta::OverrideFrontier;
 import main::rta::ProgramVirtualCallGraph;
+import main::rta::RapidTypeAnalysis;
+import main::rta::ResolveCalls;
+
+
+
+
+public rel[loc,loc] runRta(M3 model, bool forLibraries) 
+{	
+	initializeSets(model);
+	
+	CHG chg = buildCHG(Classes, Derivations, Methods, model);
+	
+	buildFrontier(chg, model);
+	
+	pvg = buildPVG(DirectCallSites, VirtualCallSites);
+	
+	rapidTypeAnalysis(pvg, model);
+
+	rel[loc,loc] graph = resolve(LiveCallInstances, LiveClasses);
+	return graph;
+}
+
+public CHG buildCHG(model) 
+{
+	initializeSets(model);
+	
+	return buildCHG(Classes, Derivations, Methods, model);
+}
+
+public void buildFrontier(M3 model) 
+{
+	CHG chg = buildCHG(model);
+
+	buildFrontier(chg, model);	
+}
+
+
+public void buildFrontier(CHG chg, M3 model) 
+{
+	buildFrontier(chg.classes, chg.derivations, chg.visibleMethods, model);
+}
 
 public void printCHG(CHG chg) 
 {

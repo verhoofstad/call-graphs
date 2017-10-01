@@ -1,6 +1,5 @@
 module main::rta::RapidTypeAnalysis
 
-
 import Prelude;
 import lang::java::m3::Core;
 import lang::java::m3::AST;
@@ -13,12 +12,13 @@ import main::rta::Sets;
 import main::rta::ClassHierarchyGraph;
 import main::rta::OverrideFrontier;
 import main::rta::ProgramVirtualCallGraph;
+import main::rta::ResolveCalls;
 
 
 // Some global variables;
 
 // The set of instantiated classes. 
-// If a class is instanmtiated it is added to this set but not iets superclasses.
+// If a class is instantiated it is added to this set but not its superclasses.
 public set[loc] LiveClasses = {};
 public set[loc] LiveFunctions = {};
 public set[int] LiveCallSites = {};
@@ -29,24 +29,9 @@ public set[tuple[loc class, CallInstanceEdge callInstance]] Qv ={};
 
 
 
-public void runRta(M3 model) 
-{	
-	initializeSets(model);
-	
-	CHG chg = buildCHG(Classes, Derivations, Methods, model);
-	
-	buildFrontier(chg, model);
-	
-	pvg = buildPVG(DirectCallSites, VirtualCallSites);
-	
-	rapidTypeAnalysis(pvg, model);
-}
-
-
-
 public void rapidTypeAnalysis(PVG pvg, M3 model) 
 {
-	// As an adaptation of RTA to handle the Java default Object class is added to the set of live classes.
+	// As an adaptation of RTA to handle the Java, the default Object class is added to the set of live classes. (§ 4.8)
 	LiveClasses = { JavaObjectClass };
 	LiveFunctions = {};
 	LiveCallSites = {};
@@ -77,12 +62,15 @@ private void analyze(loc f, bool isBase, M3 model)
 	println("Adding <f> to LiveFunctions.");
 	LiveFunctions += f;
 	
-	for( i <- [ callInstance | callInstance <- CallInstances, callInstance.callingFunction == f ])
+	// For each call instance where 'f' is the calling function
+	for(<s,f,t,P> <- CallInstances)
 	{
+		CallInstanceEdge i = <s,f,t,P>;
+		
 		// Direct calls are always added to the live call graph; 
 		// virtual calls are only added if one of the possible classes for
 		// the method is in the set of live classes CL (lines 14 and 15).
-		if(i.callSiteId in DirectCallSiteIds || (i.callSiteId in VirtualCallSiteIds && !isEmpty(LiveClasses & i.possibleClasses))) 
+		if(s in DirectCallSiteIds || (s in VirtualCallSiteIds && !isEmpty(LiveClasses & P))) 
 		{
 			addCall(i, model);
 		}
@@ -109,7 +97,7 @@ private void instantiate(loc c, M3 model)
 	}
 	LiveClasses += c;
 	
-	for(i <- [ callInstance | <class,callInstance> <- Qv, class == c ])
+	for(<c,i> <- Qv)
 	{
 		if(i notin LiveCallInstances)
 		{
@@ -119,17 +107,13 @@ private void instantiate(loc c, M3 model)
 	}
 }
 
-
-
-public void addVirtualMappings(set[loc] possibleClasses, CallInstanceEdge i) 
+private void addVirtualMappings(set[loc] possibleClasses, CallInstanceEdge i) 
 {
 	for(p <- possibleClasses) 
 	{
 		Qv += <p,i>;
 	}
 }
-
-
 
 private bool isBaseConstructorCall(CallInstanceEdge i)
 {

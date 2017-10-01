@@ -24,7 +24,7 @@ public rel[loc,loc] runChaAnalysis(M3 model) {
 			{
 				loc methodClass = classOf(method, model);
 				// Get all methods that override the callsite.
-				set[loc] overrides = { ov | <ov,b> <- model@methodOverrides, b == callsite };				
+				set[loc] overrides = { ov | <ov,b> <- model.methodOverrides, b == callsite };				
 				set[loc] cone = getConeClassSet(model, classOf(callsite, model));
 
 				if(methodClass in cone) 

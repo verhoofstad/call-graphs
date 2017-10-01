@@ -10,21 +10,7 @@ import analysis::graphs::Graph;
 import main::Util;
 import main::rta::Sets;
 
-
 alias CHG = tuple[set[loc] classes, rel[loc,loc] derivations, set[VisibleMethod] visibleMethods];
-
-
-public CHG buildCHG(M3 model) 
-{
-	if(isEmpty(Classes) && isEmpty(Derivations) && isEmpty(Methods)) 
-	{
-		println("Initializing sets...");
-		initializeSets(model);
-	}
-
-	return buildCHG(Classes, Derivations, Methods, model);
-}
-
 
 public CHG buildCHG(set[loc] classes, rel[loc,loc] derivations, set[loc] methods, M3 model)
 {
@@ -40,28 +26,25 @@ public CHG buildCHG(set[loc] classes, rel[loc,loc] derivations, set[loc] methods
 	for(c <- topologicalOrder) 
 	{
 		// For each superclass of 'c'.
-		for(b <- [ base | <base,derived> <- derivations, derived == c ]) 
+		for(<b,c> <- derivations) 
 		{
 			// For each non-private method of 'b'.
-			for(<m,d> <- [ <method,derived> | <base,method,derived> <- visibleMethods, base == b && !isPrivate(method, model) 
-				//&& !isConstructor(method)	// Constructors cannot be inherited
-			])
+			for(<b,m,d> <- visibleMethods, !isPrivate(m, model))
 			{
-				list[tuple[loc method,loc derived]] identicalMethods = [ <method,derived> | <base,method,derived> <- visibleMethods, base == c && identicalSignature(m, method, model) ]; 
-			
-				if(size(identicalMethods) > 0) 
+				// If 'c' and 'd' both contain a method with the same signature it indicates 'c' already
+				// inherited 'm' from another class 'e' (or in Java's case, another interface since it doesn's support multiple inheritance)
+				// Based on the topological order of 'd' and 'e' it is determined which method takes precedence.
+				if(any(<c,n,e> <- visibleMethods && identicalSignature(m, n, model))) 
 				{
-					loc n = identicalMethods[0].method;
-					loc e = identicalMethods[0].derived;				
-				
 					if(indexOf(topologicalOrder, d) > indexOf(topologicalOrder, e)) 
 					{
 						visibleMethods -= <c, n, e>; 
 						visibleMethods += <c, m, d>; 
 					}
-				} 
+				}
 				else
 				{
+					// Method 'm' is inherited by 'c' from superclass 'd'.
 					visibleMethods += <c, m, d>; 
 				}
 			}

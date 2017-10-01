@@ -2,5 +2,7 @@ package testCases;
 
 public class G extends F
 {
-	public H H;
+	@Override
+	public void m() {}
+	
 }

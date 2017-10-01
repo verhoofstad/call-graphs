@@ -36,7 +36,7 @@ import analysis::m3::Core;
 
 public void m3PreChecks(M3 model) 
 {
-	// No anonymous class should have a constructor defined in either @declarations or @containtment.
+	// No anonymous class should have a constructor defined in either .declarations or .containtment.
 }
 
 
@@ -49,32 +49,32 @@ public M3 addObjectInheritance(M3 model)
 
 public M3 addDefaultConstructors(M3 model) 
 {
-	classesWithoutConstructor = classes(model) - { class | <class,constructor> <- model@containment, isConstructor(constructor) };
+	classesWithoutConstructor = classes(model) - { class | <class,constructor> <- model.containment, isConstructor(constructor) };
 		
 	for(class <- classesWithoutConstructor) 
 	{
 		defaultConstructor = makeConstructorLocation(class);
 	
-		model@containment += <class, defaultConstructor>;
-		model@names += <class.file, defaultConstructor>;
-		model@types += <defaultConstructor, constructor(defaultConstructor, [])>;
+		model.containment += {<class, defaultConstructor>};
+		model.names += {<class.file, defaultConstructor>};
+		model.types += {<defaultConstructor, constructor(defaultConstructor, [])>};
 		
 		// Determine the access modifiers of the class. We're not interested if the class 
 		// is abstract or final since it has no impact on the modifiers for the constructor. 
-		modifiers = { m | <c,m> <- model@modifiers, c == class && m notin { \abstract(), \final() } };
+		modifiers = { m | <c,m> <- model.modifiers, c == class && m notin { \abstract(), \final() } };
 		
 		for(modifier <- modifiers) 
 		{
-			model@modifiers += <defaultConstructor, modifier>;
+			model.modifiers += {<defaultConstructor, modifier>};
 		}
 		
 		// Determine if the class has a parent class. If so, we add a method invocation from
 		// the current class' constructor to the parent class' constructor.
-		superClasses = [ superClass | <subClass, superClass> <- model@extends, subClass == class ];
+		superClasses = [ superClass | <subClass, superClass> <- model.extends, subClass == class ];
 		
 		if(size(superClasses) == 1) 
 		{
-			model@methodInvocation += <defaultConstructor, makeConstructorLocation(superClasses[0])>;
+			model.methodInvocation += {<defaultConstructor, makeConstructorLocation(superClasses[0])>};
 		}
 		elseif(size(superClasses) > 1) 
 		{
@@ -100,12 +100,12 @@ public M3 addConstructorsForAnonymousClasses(M3 model)
 {
 	// An anonymous class cannot have an explicitly declared constructor.
 	// So we can assume none of the anonymous classes have a constructor defined in the M3 model.
-	classesWithoutConstructor = { c | <c,f> <- model@declarations, c.scheme == "java+anonymousClass" };
+	classesWithoutConstructor = { c | <c,f> <- model.declarations, c.scheme == "java+anonymousClass" };
 		
 	for(anonymousClass <- classesWithoutConstructor) 
 	{
 		// An anonymous class always extends an existing class -or- implements an inteface.
-		superTypes = [ superType | <subType, superType> <- model@extends + model@implements, subType == anonymousClass ];
+		superTypes = [ superType | <subType, superType> <- model.extends + model.implements, subType == anonymousClass ];
 		
 		if(size(superTypes) != 1) 
 		{
@@ -116,7 +116,7 @@ public M3 addConstructorsForAnonymousClasses(M3 model)
 		superType = superTypes[0];		
 	
 		// Attempt to find the constructor invocation of the anonymous class. There should be exactly one.
-		anonymousConstructors = [ t | <s,t> <- model@methodInvocation, contains(t.path, anonymousClass.path) ];
+		anonymousConstructors = [ t | <s,t> <- model.methodInvocation, contains(t.path, anonymousClass.path) ];
 		
 		if(size(anonymousConstructors) != 1) 
 		{
@@ -127,13 +127,13 @@ public M3 addConstructorsForAnonymousClasses(M3 model)
 		str params = substring(anonymousConstructor.file, findLast(anonymousConstructor.file, "("));
 	
 	
-		model@containment += <anonymousClass, anonymousConstructor>;
+		model.containment += {<anonymousClass, anonymousConstructor>};
 
 		if(isClass(superType)) 
 		{
 			// Attempt to find the constructor of the super class. Because there can be more than one
 			// we include the parameter signature.
-			parentConstructors = [ <con1,ts> | <class1,con1,con2,ts> <- model@containment join model@types, 
+			parentConstructors = [ <con1,ts> | <class1,con1,con2,ts> <- model.containment join model.types, 
 				con1 == con2 && isConstructor(con1) && class1 == superType && contains(con1.path, params) ];
 			
 			if(size(parentConstructors) != 1) 
@@ -144,12 +144,12 @@ public M3 addConstructorsForAnonymousClasses(M3 model)
 			parentConstructor = parentConstructors[0][0];
 			parentConstructorType = parentConstructors[0][1];
 			
-			model@methodInvocation += <anonymousConstructor, parentConstructor>;
-			model@types += <anonymousConstructor, constructor(anonymousConstructor, parentConstructorType.parameters)>;
+			model.methodInvocation += {<anonymousConstructor, parentConstructor>};
+			model.types += {<anonymousConstructor, constructor(anonymousConstructor, parentConstructorType.parameters)>};
 		}
 		else
 		{
-			model@types += <anonymousConstructor, constructor(anonymousConstructor, [])>;
+			model.types += {<anonymousConstructor, constructor(anonymousConstructor, [])>};
 		}
 	}		
 	return model;
