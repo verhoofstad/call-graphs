@@ -1,6 +1,6 @@
 module main::results::ResultSet
 
-alias result = tuple[
+alias Result = tuple[
 	str organisation,
 	str name,
 	str revision,

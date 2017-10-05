@@ -6,17 +6,17 @@ import String;
 import IO;
 
 
-public result resultsOf(list[result] results, str organisation, str name, str revision) 
+public Result resultsOf(list[Result] results, str organisation, str name, str revision) 
 {
 	return head([ result | result <- results, result.organisation == organisation && result.name == name && result.revision == revision ]);
 }
 
-public list[result] LoadResults(loc resultsFile) 
+public list[Result] LoadResults(loc resultsFile) 
 {
 	if(!isFile(resultsFile)) throw "<resultsFile> is not a valid file.";
 	
 	list[str] lines = readFileLines(resultsFile);
-	list[result] results = [];
+	list[Result] results = [];
 	
 	// Skip the first lines as it contains the headers.
 	for(line <- tail(lines)) 

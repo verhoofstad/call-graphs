@@ -6,4 +6,12 @@ public class A
 	public void m() {}
 	
 	public void p() {}
+	
+	static {
+		
+		B obj = new B();
+		
+		obj.p();
+		
+	}
 }
