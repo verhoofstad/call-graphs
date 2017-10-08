@@ -23,7 +23,7 @@ public list[Result] LoadResults(loc resultsFile)
 	{
 		parts = split("\t", line);
 		
-		results += <
+		Result result = <
 			parts[0], // str organisation
 			parts[1], // str name
 			parts[2], // str revision,
@@ -82,6 +82,12 @@ public list[Result] LoadResults(loc resultsFile)
 			toReal(parts[55]),	// num cpa_callGraphBuildTime,
 			parts[56]			// str cpa_Memory
 			>;
+			
+        // Compensate for bug in Docker code.
+        result.project_interfaceCount  = result.project_publicInterfaceCount + result.project_packageVisibleInterfaceCount;
+        result.libraries_interfaceCount = result.libraries_publicInterfaceCount + result.libraries_packageVisibleInterfaceCount;
+        
+        results += result;
 	}
 	return results;
 }

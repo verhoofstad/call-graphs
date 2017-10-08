@@ -14,13 +14,37 @@ import main::cha::ClassHierarchyAnalysis;
 import main::results::ResultSet;
 import main::results::LoadResults;
 
+// Options
+public bool countEnumsAsClasses = true;
+public bool skipJDK = false;
+public bool skipLibraries = false;
 
 // Environmental settings
 public loc libraryFolder = |file:///C:/CallGraphData/Libraries|;
 public loc jdkFolder = |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64|;
 public loc resultsFile = |file:///C:/CallGraphData/results.txt|;
-public loc differencesFile = |file:///C:/CallGraphData/differences.txt|;
+public loc differencesFile = |file:///C:/CallGraphData/differences.csv|;
 
+
+alias M3Result = tuple[
+    loc modelId,
+    int classCount,
+    int publicClassCount,
+    int packageVisibleClassCount,
+    real packageVisibleClassPercentage,
+    int enumCount,
+    int publicEnumCount,
+    int privateEnumCount,
+    int packageVisibleEnumCount,
+    int interfaceCount,
+    int publicInterfaceCount,
+    int packageVisibleInterfaceCount,
+    int methodCount,
+    int publicMethods,
+    int protectedMethods,
+    int privateMethods,
+    int packagePrivateMethods
+];
 
 public void analyseJars() 
 {
@@ -36,34 +60,36 @@ public void analyseJars(list[int] libraryIdentifiers)
     results = LoadResults(resultsFile);
     println("Ok");
 	
-    print("Loading Java JDK Libraries...");	
-    jdkModel = createM3FromLocation(jdkFolder);
-    println("Ok");
+    print("Loading Java JDK Libraries...");
+    M3 jdkModel;
+    if(skipJDK) 
+    {
+        jdkModel = m3(|project://empty|);
+        println("Skipped");
+    } 
+    else
+    {
+        jdkModel = createM3FromLocation(jdkFolder);
+        println("Ok");
+    }
     println();
 
-    list[str] differences = [];
+    // Create an output file.
+    str header = "description;Rascal Count;Opal Count";
+    writeFile(differencesFile, "<header>\r\n");
 
 	for(library <- TestDataSet, library.id in libraryIdentifiers) 
 	{
 		resultSet = resultsOf(results, library.organisation,  library.name, library.revision);
 	
-		differences = differences + analyseJar(library, resultSet, jdkModel);
+		analyseJar(library, resultSet, jdkModel);
 	}
 
-	runningTime = now() - startTime;
-	
-	writeFile(differencesFile, "Generated on <now()>\r\n");
-	
-	for(line <- differences) 
-	{
-		appendToFile(differencesFile, line + "\r\n");
-	}
-	
 	println("");
-	println("Total running time: <formatDuration(runningTime)>");
+	println("Total running time: <formatDuration(now() - startTime)>");
 }
 
-public list[str] analyseJar(Library library, Result resultSet, M3 jdkModel) 
+public void analyseJar(Library library, Result resultSet, M3 jdkModel) 
 {
 	println("Processing: <library.id> with <library.organisation> | <library.name> | <library.revision>");
 	println("");
@@ -86,20 +112,25 @@ public list[str] analyseJar(Library library, Result resultSet, M3 jdkModel)
 	libModel = createM3FromJars(|project://libModel|, [ libraryFolder + libFile | libFile <- library.libFiles, libFile != "java-8-openjdk-amd64/jre/lib/" ]);
 	println("Ok");
 
-	print("    Merging Libraries model with JDK model...");
-	libModel = composeM3(|project://libModel|, { libModel, jdkModel });
+    if(!skipJDK) {
+	   print("    Merging Libraries model with JDK model...");
+	   libModel = composeM3(|project://libModel|, { libModel, jdkModel });
+	   println("Ok");
+	}
+
+    print("    Counting code elements in CP Model...");
+	cpResults = countElements(cpModel);
 	println("Ok");
 	
-	differences = compareM3(cpModel, libModel, resultSet);
+	print("    Counting code elements in Libraries...");
+    libResults = countElements(libModel);
+    println("Ok");
 	
-	//validateM3(cpModel);
-
-	runningTime = now() - startTime;
+	printComparison(cpResults, libResults, resultSet);
+    appendToOutputFile(cpResults, libResults, resultSet);	
 	
 	println("");
-	println("    Library running time: <formatDuration(runningTime)>");
-	
-	return differences;
+	println("    Library running time: <formatDuration(now() - startTime)>");
 }
 
 public M3 createM3FromLocation(loc location) 
@@ -122,15 +153,8 @@ public list[loc] findJars(loc location)
 {
 	list[loc] files = [ location + entry | entry <- listEntries(location) ];
 	list[loc] jars = [ entry | entry <- files, entry.extension == "jar" ];
-
-	for(file <- files) 
-	{
-		if(isDirectory(file)) 
-		{
-			jars = jars + findJars(file);
-		}
-	}
-	return jars;
+	
+	return (jars | it + findJars(file) | file <- files, isDirectory(file) );
 }
 
 public str formatDuration(Duration duration) 
@@ -157,170 +181,117 @@ public str formatDuration(Duration duration)
 }
 
 
-public Result countElements(M3 cpModel, M3 libModel) 
-{
-}
-
-
-public list[str] compareM3(M3 cpModel, M3 libModel, Result resultSet) 
+public void countPackagePrivateClasses(M3 cpModel) 
 {
     int project_classCount = size(classes(cpModel));
     int project_publicClassCount = size( { c | <c,m> <- cpModel.modifiers, isClass(c) && m == \public() } );
     int project_packageVisibleClassCount = project_classCount - project_publicClassCount;
     
     real project_packageVisibleClassPercentage = project_packageVisibleClassCount / toReal(project_classCount) * 100;
+}
 
-    int project_enumCount = size(enums(cpModel));
-    int project_publicEnumCount = size( { e | <e,m> <- cpModel.modifiers, isEnum(e) && m == \public() } );
-    int project_packageVisibleEnumCount = project_enumCount - project_publicEnumCount;
 
-    int project_interfaceCount = size(interfaces(cpModel));
-    int project_publicInterfaceCount = size( { i | <i,m> <- cpModel.modifiers, isInterface(i) && m == \public() } );
-    int project_packageVisibleInterfaceCount = project_interfaceCount - project_publicInterfaceCount;
-
-    int project_methodCount = size(methods(cpModel));
-    int project_publicMethods = size( { me | <me,m> <- cpModel.modifiers, isMethod(me) && m == \public() } );
-    int project_protectedMethods = size( { me | <me,m> <- cpModel.modifiers, isMethod(me) && m == \protected() } );
-    int project_privateMethods = size( { me | <me,m> <- cpModel.modifiers, isMethod(me) && m == \private() } );
-    int project_packagePrivateMethods = project_methodCount - project_publicMethods - project_protectedMethods - project_privateMethods;
-
-    int libraries_classCount = size(classes(libModel));
-    int libraries_publicClassCount = size( { c | <c,m> <- libModel.modifiers, isClass(c) && m == \public() } );
-    int libraries_packageVisibleClassCount = libraries_classCount - libraries_publicClassCount;
-
-    int libraries_enumCount = size(enums(libModel));
-    int libraries_publicEnumCount = size( { e | <e,m> <- libModel.modifiers, isEnum(e) && m == \public() } );
-    int libraries_packageVisibleEnumCount = libraries_enumCount - libraries_publicEnumCount;
-
-    int libraries_interfaceCount = size(interfaces(libModel));
-    int libraries_publicInterfaceCount = size( { i | <i,m> <- libModel.modifiers, isInterface(i) && m == \public() } );
-    int libraries_packageVisibleInterfaceCount = libraries_interfaceCount - libraries_publicInterfaceCount;
-
-    int libraries_methodCount = size(methods(libModel));
-    int libraries_publicMethods = size( { me | <me,m> <- libModel.modifiers, isMethod(me) && m == \public() } );
-    int libraries_protectedMethods = size( { me | <me,m> <- libModel.modifiers, isMethod(me) && m == \protected() } );
-    int libraries_privateMethods = size( { me | <me,m> <- libModel.modifiers, isMethod(me) && m == \private() } );
-    int libraries_packagePrivateMethods = libraries_methodCount - libraries_publicMethods - libraries_protectedMethods - libraries_privateMethods;
-
-    // Compensate for bug in Docker code.
-    resultSet.project_interfaceCount  = resultSet.project_publicInterfaceCount + resultSet.project_packageVisibleInterfaceCount;
-    resultSet.libraries_interfaceCount = resultSet.libraries_publicInterfaceCount + resultSet.libraries_packageVisibleInterfaceCount;
+public M3Result countElements(M3 model) 
+{
+    int classCount = size(classes(model));
+    int publicClassCount = size( { c | <c,m> <- model.modifiers, isClass(c) && m == \public() } );
+    int packageVisibleClassCount = classCount - publicClassCount;
     
-    // Enums are counted as classes.
-    project_classCount += project_enumCount;
-    project_publicClassCount += project_publicEnumCount;
-    project_packageVisibleClassCount += project_packageVisibleEnumCount;
-    
-    libraries_classCount += libraries_enumCount;
-    libraries_publicClassCount += libraries_publicEnumCount;
-    libraries_packageVisibleClassCount += libraries_packageVisibleEnumCount;
+    real packageVisibleClassPercentage = 0.0;
+    if(classCount > 0) {
+        packageVisibleClassPercentage = packageVisibleClassCount / toReal(classCount) * 100;
+    }
 
-    println();
-    printStat("Project class count", project_classCount, resultSet.project_classCount); 
-    printStat("Project public class count", project_publicClassCount, resultSet.project_publicClassCount); 
-    printStat("Project package visible count", project_packageVisibleClassCount, resultSet.project_packageVisibleClassCount);
-    printStat("Project enum count", project_enumCount); 
-    println("    Project package visible class percentage : <project_packageVisibleClassPercentage>%");
-    println();
-    printStat("Project interface count", project_interfaceCount, resultSet.project_interfaceCount); 
-    printStat("Project public interface count", project_publicInterfaceCount, resultSet.project_publicInterfaceCount); 
-    printStat("Project package visible interface count", project_packageVisibleInterfaceCount, resultSet.project_packageVisibleInterfaceCount); 
-    println();
-    printStat("Project method count", project_methodCount, resultSet.project_methodCount); 
-    printStat("Project public method count", project_publicMethods, resultSet.project_publicMethods); 
-    printStat("Project protected method count", project_protectedMethods, resultSet.project_protectedMethods); 
-    printStat("Project package private method count", project_packagePrivateMethods, resultSet.project_packagePrivateMethods); 
-    printStat("Project private method count", project_privateMethods, resultSet.project_privateMethods);
-    println();
-    printStat("Libraries class count", libraries_classCount, resultSet.libraries_classCount); 
-    printStat("Libraries public class count", libraries_publicClassCount, resultSet.libraries_publicClassCount); 
-    printStat("Libraries package visible count", libraries_packageVisibleClassCount, resultSet.libraries_packageVisibleClassCount);
-    printStat("Libraries enum count", libraries_enumCount);
-    println();
-    printStat("Libraries interface count", libraries_interfaceCount, resultSet.libraries_interfaceCount); 
-    printStat("Libraries public interface count", libraries_publicInterfaceCount, resultSet.libraries_publicInterfaceCount); 
-    printStat("Libraries package visible interface count", libraries_packageVisibleInterfaceCount, resultSet.libraries_packageVisibleInterfaceCount); 
-    println();
-    printStat("Libraries method count", libraries_methodCount, resultSet.libraries_methodCount); 
-    printStat("Libraries public method count", libraries_publicMethods, resultSet.libraries_publicMethods); 
-    printStat("Libraries protected method count", libraries_protectedMethods, resultSet.libraries_protectedMethods); 
-    printStat("Libraries package private method count", libraries_packagePrivateMethods, resultSet.libraries_packagePrivateMethods); 
-    printStat("Libraries private method count", libraries_privateMethods, resultSet.libraries_privateMethods);
-    println();
+    int enumCount = size(enums(model));
+    int publicEnumCount = size( { e | <e,m> <- model.modifiers, isEnum(e) && m == \public() } );
+    int privateEnumCount = size( { e | <e,m> <- model.modifiers, isEnum(e) && m == \private() } );
+    int packageVisibleEnumCount = enumCount - publicEnumCount - privateEnumCount;
+
+    int interfaceCount = size(interfaces(model));
+    int publicInterfaceCount = size( { i | <i,m> <- model.modifiers, isInterface(i) && m == \public() } );
+    int packageVisibleInterfaceCount = interfaceCount - publicInterfaceCount;
+
+    int methodCount = size(methods(model));
+    int publicMethods = size( { me | <me,m> <- model.modifiers, isMethod(me) && m == \public() } );
+    int protectedMethods = size( { me | <me,m> <- model.modifiers, isMethod(me) && m == \protected() } );
+    int privateMethods = size( { me | <me,m> <- model.modifiers, isMethod(me) && m == \private() } );
+    int packagePrivateMethods = methodCount - publicMethods - protectedMethods - privateMethods;
     
-    list[str] differences = [];
-    bool differencesDetected = false;
-    
-    if( project_classCount != resultSet.project_classCount
-        || project_publicClassCount != resultSet.project_publicClassCount
-        || project_packageVisibleClassCount != resultSet.project_packageVisibleClassCount
-        || project_publicInterfaceCount != resultSet.project_publicInterfaceCount
-        || project_packageVisibleInterfaceCount != resultSet.project_packageVisibleInterfaceCount)
+    if(countEnumsAsClasses) 
     {
-        differences += "Class/Interfaces differences detected in <cpModel.id>";
-        
-        differences += "	Project class count:                     <project_classCount>, <resultSet.project_classCount>";
-        differences += "	Project pulic class count:               <project_publicClassCount>, <resultSet.project_publicClassCount>";
-        differences += "	Project package visible class count:     <project_packageVisibleClassCount>, <resultSet.project_packageVisibleClassCount>";
-        differences += "	Project enum count:                      <project_enumCount>";
-        differences += "	Project pulic interface count:           <project_publicInterfaceCount>, <resultSet.project_publicInterfaceCount>";
-        differences += "	Project package visible interface count: <project_packageVisibleInterfaceCount>, <resultSet.project_packageVisibleInterfaceCount>";
-        differencesDetected  = true;
-    } 
-    
-    if( project_methodCount != resultSet.project_methodCount
-        || project_publicMethods != resultSet.project_publicMethods
-        || project_protectedMethods != resultSet.project_protectedMethods 
-        || project_packagePrivateMethods != resultSet.project_packagePrivateMethods 
-        || project_privateMethods != resultSet.project_privateMethods) 
-    {
-        differences += "Method differences detected in <cpModel.id>";
-        differences += "	Project method count:                    <project_methodCount>, <resultSet.project_methodCount>		<project_methodCount - resultSet.project_methodCount>";
-        differences += "	Project public method count:             <project_publicMethods>, <resultSet.project_publicMethods>	<project_publicMethods - resultSet.project_publicMethods>";
-        differences += "	Project protected method count:          <project_protectedMethods>, <resultSet.project_protectedMethods>";
-        differences += "	Project pacakage private method count:   <project_packagePrivateMethods>, <resultSet.project_packagePrivateMethods>";
-        differences += "	Project private method count:            <project_privateMethods>, <resultSet.project_privateMethods>";
-        differencesDetected  = true;
+        classCount += enumCount;
+        publicClassCount += publicEnumCount;
+        packageVisibleClassCount += packageVisibleEnumCount;
     }
     
-    if(!differencesDetected)
-    {
-        differences += "File <cpModel.id> has no differences.";
-    }
-    
-    /*
-    int all_classCount,
-    int all_interfaceCount,
-    int all_publicClassCount,
-    int all_packageVisibleClassCount,
-    int all_publicInterfaceCount,
-    int all_packageVisibleInterfaceCount,
-    int libraries_classFileCount,
-    int libraries_classCount,
-    int libraries_interfaceCount,
-    int libraries_publicClassCount,
-    int libraries_packageVisibleClassCount,
-    int libraries_publicInterfaceCount,
-    int libraries_packageVisibleInterfaceCount,
-    int all_methodCount,
-    int all_publicMethods,
-    int all_protectedMethods,
-    int all_packagePrivateMethods,
-    int all_privateMethods,
-    int libraries_methodCount,
-    int libraries_publicMethods,
-    int libraries_protectedMethods,
-    int libraries_packagePrivateMethods,
-    int libraries_privateMethods,
-    */
-    
-    return differences;
+    return <
+        model.id,
+        classCount,
+        publicClassCount,
+        packageVisibleClassCount,
+        packageVisibleClassPercentage,
+        enumCount,
+        publicEnumCount,
+        privateEnumCount,
+        packageVisibleEnumCount,
+        interfaceCount,
+        publicInterfaceCount,
+        packageVisibleInterfaceCount,
+        methodCount,
+        publicMethods,
+        protectedMethods,
+        privateMethods,
+        packagePrivateMethods
+    >;
+}
+
+
+public void printComparison(M3Result cpResults, M3Result libResults, Result resultSet) 
+{
+    println();
+    printStat("Project class count", cpResults.classCount, resultSet.project_classCount); 
+    printStat("Project public class count", cpResults.publicClassCount, resultSet.project_publicClassCount); 
+    printStat("Project package visible count", cpResults.packageVisibleClassCount, resultSet.project_packageVisibleClassCount);
+    printStat("Project enum count", cpResults.enumCount); 
+    printStat("Project private enum count", cpResults.privateEnumCount); 
+    printStat("Project package visible enum count", cpResults.packageVisibleEnumCount); 
+    println("    Project package visible class percentage :  <right("<round(cpResults.packageVisibleClassPercentage, 0.1)>", 6)> %");
+    println();
+    printStat("Project interface count", cpResults.interfaceCount, resultSet.project_interfaceCount); 
+    printStat("Project public interface count", cpResults.publicInterfaceCount, resultSet.project_publicInterfaceCount); 
+    printStat("Project package visible interface count", cpResults.packageVisibleInterfaceCount, resultSet.project_packageVisibleInterfaceCount); 
+    println();
+    printStat("Project method count", cpResults.methodCount, resultSet.project_methodCount); 
+    printStat("Project public method count", cpResults.publicMethods, resultSet.project_publicMethods); 
+    printStat("Project protected method count", cpResults.protectedMethods, resultSet.project_protectedMethods); 
+    printStat("Project package private method count", cpResults.packagePrivateMethods, resultSet.project_packagePrivateMethods); 
+    printStat("Project private method count", cpResults.privateMethods, resultSet.project_privateMethods);
+    println();
+    printStat("Libraries class count", libResults.classCount, resultSet.libraries_classCount); 
+    printStat("Libraries public class count", libResults.publicClassCount, resultSet.libraries_publicClassCount); 
+    printStat("Libraries package visible count", libResults.packageVisibleClassCount, resultSet.libraries_packageVisibleClassCount);
+    printStat("Libraries enum count", libResults.enumCount);
+    printStat("Libraries private enum count", libResults.privateEnumCount); 
+    printStat("Libraries package visible enum count", libResults.packageVisibleEnumCount); 
+    println("    Libraries package visible class percentage:  <right("<round(cpResults.packageVisibleClassPercentage, 0.1)>", 6)> %");
+    println();
+    printStat("Libraries interface count", libResults.interfaceCount, resultSet.libraries_interfaceCount); 
+    printStat("Libraries public interface count", libResults.publicInterfaceCount, resultSet.libraries_publicInterfaceCount); 
+    printStat("Libraries package visible interface count", libResults.packageVisibleInterfaceCount, resultSet.libraries_packageVisibleInterfaceCount); 
+    println();
+    printStat("Libraries method count", libResults.methodCount, resultSet.libraries_methodCount); 
+    printStat("Libraries public method count", libResults.publicMethods, resultSet.libraries_publicMethods); 
+    printStat("Libraries protected method count", libResults.protectedMethods, resultSet.libraries_protectedMethods); 
+    printStat("Libraries package private method count", libResults.packagePrivateMethods, resultSet.libraries_packagePrivateMethods); 
+    printStat("Libraries private method count", libResults.privateMethods, resultSet.libraries_privateMethods);
+    println();
 }
 
 public void printStat(str description, int value1) 
 {
     println("    <left(description, 41, " ")>:  <right("<value1>", 6, " ")>");
 }
+
 public void printStat(str description, int value1, int value2) 
 {
     int diff = value1 - value2;
@@ -329,24 +300,60 @@ public void printStat(str description, int value1, int value2)
     println("    <left(description, 41, " ")>:  <right("<value1>", 6, " ")>  <right("<value2>", 6, " ")>  <right(diffText, 6, " ")>");
 }
 
+
+public void appendToOutputFile(M3Result cpResults, M3Result libResults, Result resultSet) 
+{
+    appendToFile(differencesFile, "<resultSet.organisation> <resultSet.name> <resultSet.revision>;;\r\n"); 
+    appendToFile(differencesFile, "Project class count;<cpResults.classCount>;<resultSet.project_classCount>\r\n"); 
+    appendToFile(differencesFile, "Project public class count;<cpResults.publicClassCount>;<resultSet.project_publicClassCount>\r\n"); 
+    appendToFile(differencesFile, "Project package visible count;<cpResults.packageVisibleClassCount>;<resultSet.project_packageVisibleClassCount>\r\n");
+    appendToFile(differencesFile, "Project enum count;<cpResults.enumCount>\r\n"); 
+    appendToFile(differencesFile, "Project private enum count;<cpResults.privateEnumCount>\r\n"); 
+    appendToFile(differencesFile, "Project package visible enum count;<cpResults.packageVisibleEnumCount>\r\n"); 
+    appendToFile(differencesFile, "Project package visible class percentage;<cpResults.packageVisibleClassPercentage>\r\n");
+    appendToFile(differencesFile, "Project interface count;<cpResults.interfaceCount>;<resultSet.project_interfaceCount>\r\n"); 
+    appendToFile(differencesFile, "Project public interface count;<cpResults.publicInterfaceCount>;<resultSet.project_publicInterfaceCount>\r\n"); 
+    appendToFile(differencesFile, "Project package visible interface count;<cpResults.packageVisibleInterfaceCount>;<resultSet.project_packageVisibleInterfaceCount>\r\n"); 
+    appendToFile(differencesFile, "Project method count;<cpResults.methodCount>;<resultSet.project_methodCount>\r\n"); 
+    appendToFile(differencesFile, "Project public method count;<cpResults.publicMethods>;<resultSet.project_publicMethods>\r\n"); 
+    appendToFile(differencesFile, "Project protected method count;<cpResults.protectedMethods>;<resultSet.project_protectedMethods>\r\n"); 
+    appendToFile(differencesFile, "Project package private method count;<cpResults.packagePrivateMethods>;<resultSet.project_packagePrivateMethods>\r\n"); 
+    appendToFile(differencesFile, "Project private method count;<cpResults.privateMethods>;<resultSet.project_privateMethods>\r\n");
+    appendToFile(differencesFile, "Libraries class count;<libResults.classCount>;<resultSet.libraries_classCount>\r\n"); 
+    appendToFile(differencesFile, "Libraries public class count;<libResults.publicClassCount>;<resultSet.libraries_publicClassCount>\r\n"); 
+    appendToFile(differencesFile, "Libraries package visible count;<libResults.packageVisibleClassCount>;<resultSet.libraries_packageVisibleClassCount>\r\n");
+    appendToFile(differencesFile, "Libraries enum count;<libResults.enumCount>\r\n");
+    appendToFile(differencesFile, "Libraries private enum count;<libResults.privateEnumCount>\r\n"); 
+    appendToFile(differencesFile, "Libraries package visible enum count;<libResults.packageVisibleEnumCount>\r\n"); 
+    appendToFile(differencesFile, "Libraries package visible class percentage;<cpResults.packageVisibleClassPercentage>\r\n");
+    appendToFile(differencesFile, "Libraries interface count;<libResults.interfaceCount>;<resultSet.libraries_interfaceCount>\r\n"); 
+    appendToFile(differencesFile, "Libraries public interface count;<libResults.publicInterfaceCount>;<resultSet.libraries_publicInterfaceCount>\r\n"); 
+    appendToFile(differencesFile, "Libraries package visible interface count;<libResults.packageVisibleInterfaceCount>;<resultSet.libraries_packageVisibleInterfaceCount>\r\n"); 
+    appendToFile(differencesFile, "Libraries method count;<libResults.methodCount>;<resultSet.libraries_methodCount>\r\n"); 
+    appendToFile(differencesFile, "Libraries public method count;<libResults.publicMethods>;<resultSet.libraries_publicMethods>\r\n"); 
+    appendToFile(differencesFile, "Libraries protected method count;<libResults.protectedMethods>;<resultSet.libraries_protectedMethods>\r\n"); 
+    appendToFile(differencesFile, "Libraries package private method count;<libResults.packagePrivateMethods>;<resultSet.libraries_packagePrivateMethods>\r\n"); 
+    appendToFile(differencesFile, "Libraries private method count;<libResults.privateMethods>;<resultSet.libraries_privateMethods>\r\n");
+}
+
 public void validateM3(M3 model) 
 {
     set[loc]  notDeclared = {};
     
     notDeclared = carrier(model.methodInvocation) - domain(model.declarations);
-    println("Undeclared method invocations: <size(notDeclared)>");
+    println("    Undeclared method invocations: <size(notDeclared)>");
     
-    notDeclared = { replaceAll(m.uri, "$", "/") | m <- carrier(model.methodInvocation) } - { replaceAll(m.uri, "$", "/" ) | m <- domain(model.declarations) };
-    println("Undeclared method invocations when ignoring $ sign: <size(notDeclared)>");
+    notDeclaredStr = { replaceAll(m.uri, "$", "/") | m <- carrier(model.methodInvocation) } - { replaceAll(m.uri, "$", "/" ) | m <- domain(model.declarations) };
+    println("    Undeclared method invocations when ignoring $ sign: <size(notDeclaredStr)>");
     
     notDeclared = domain(model.modifiers) - domain(model.declarations);
-    println("Undeclared element in modifiers: <size(notDeclared)>");
+    println("    Undeclared element in modifiers: <size(notDeclared)>");
     
     notDeclared = carrier(model.extends) - domain(model.declarations);
-    println("Undeclared extends:            <size(notDeclared)>");
+    println("    Undeclared extends:            <size(notDeclared)>");
     
     notDeclared = carrier(model.implements) - domain(model.declarations);
-    println("Undeclared implements:         <size(notDeclared)>");
+    println("    Undeclared implements:         <size(notDeclared)>");
 }
 
 
@@ -367,36 +374,19 @@ public void printM3(M3 model)
 
 public void analyseJDK() 
 {
-    list[loc] jdkFiles = [|file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64/jre/lib/charsets.jar|,
-        |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64/jre/lib/jce.jar|,
-        |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64/jre/lib/jsse.jar|,
-        |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64/jre/lib/management-agent.jar|,
-        |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64/jre/lib/resources.jar|,
-        |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64/jre/lib/rt.jar|,
-        |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64/jre/lib/ext/cldrdata.jar|,
-        |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64/jre/lib/ext/dnsns.jar|,
-        |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64/jre/lib/ext/icedtea-sound.jar|,
-        |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64/jre/lib/ext/jaccess.jar|,
-        |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64/jre/lib/ext/java-atk-wrapper.jar|,
-        |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64/jre/lib/ext/localedata.jar|,
-        |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64/jre/lib/ext/nashorn.jar|,
-        |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64/jre/lib/ext/sunec.jar|,
-        |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64/jre/lib/ext/sunjce_provider.jar|,
-        |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64/jre/lib/ext/sunpkcs11.jar|,
-        |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64/jre/lib/ext/zipfs.jar|,
-        |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64/jre/lib/security/local_policy.jar|,
-        |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64/jre/lib/security/US_export_policy.jar|];
+    list[loc] jdkFiles = findJars(jdkFolder); 
 
     for(loc jdkFile <- jdkFiles) 
     {
+        println("Stats for <jdkFile>:");
+        println();
+
         M3 model = createM3FromJar(jdkFile);
 
         int packageCount = size({ d | <d,_> <- model.declarations, d.scheme == "java+package" });
         int methodCount = size(methods(model));
         int classFileCount = size({ d | <d,_> <- model.declarations, d.scheme == "java+compilationUnit" });
         
-        println("Stats for <jdkFile>:");
-        println();
         println("Package count:     <packageCount>");
         println("Method count:      <methodCount>");
         println("Class file count:  <classFileCount>");
