@@ -16,14 +16,14 @@ import main::results::LoadResults;
 
 // Options
 public bool countEnumsAsClasses = true;
-public bool skipJDK = false;
-public bool skipLibraries = false;
+public bool skipLibraries = true;
 
 // Environmental settings
 public loc libraryFolder = |file:///C:/CallGraphData/Libraries|;
 public loc jdkFolder = |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64|;
 public loc resultsFile = |file:///C:/CallGraphData/results.txt|;
 public loc differencesFile = |file:///C:/CallGraphData/differences.csv|;
+public loc packageVisibleFile = |file:///C:/CallGraphData/packageVisible.csv|;
 
 
 alias M3Result = tuple[
@@ -62,7 +62,7 @@ public void analyseJars(list[int] libraryIdentifiers)
 	
     print("Loading Java JDK Libraries...");
     M3 jdkModel;
-    if(skipJDK) 
+    if(skipLibraries) 
     {
         jdkModel = m3(|project://empty|);
         println("Skipped");
@@ -77,6 +77,10 @@ public void analyseJars(list[int] libraryIdentifiers)
     // Create an output file.
     str header = "description;Rascal Count;Opal Count";
     writeFile(differencesFile, "<header>\r\n");
+
+    // Create an output file for package visibility 
+    header = "organisation;name;revision;public_classes;package_visible_classes;percentage";
+    writeFile(packageVisibleFile, "<header>\r\n");
 
 	for(library <- TestDataSet, library.id in libraryIdentifiers) 
 	{
@@ -108,26 +112,36 @@ public void analyseJar(Library library, Result resultSet, M3 jdkModel)
 	cpModel = createM3FromLocation(libraryFolder + library.cpFile);
 	println("Ok");
 
-	print("    Loading LibFiles...");
-	libModel = createM3FromJars(|project://libModel|, [ libraryFolder + libFile | libFile <- library.libFiles, libFile != "java-8-openjdk-amd64/jre/lib/" ]);
-	println("Ok");
-
-    if(!skipJDK) {
-	   print("    Merging Libraries model with JDK model...");
-	   libModel = composeM3(|project://libModel|, { libModel, jdkModel });
-	   println("Ok");
-	}
-
     print("    Counting code elements in CP Model...");
 	cpResults = countElements(cpModel);
 	println("Ok");
 	
-	print("    Counting code elements in Libraries...");
-    libResults = countElements(libModel);
-    println("Ok");
+    if(!skipLibraries) {
+
+		print("    Loading LibFiles...");
+		libModel = createM3FromJars(|project://libModel|, [ libraryFolder + libFile | libFile <- library.libFiles, libFile != "java-8-openjdk-amd64/jre/lib/" ]);
+		println("Ok");
+		
+		print("    Merging Libraries model with JDK model...");
+		libModel = composeM3(|project://libModel|, { libModel, jdkModel });
+		println("Ok");
+
+		print("    Counting code elements in Libraries...");
+	    libResults = countElements(libModel);
+	    println("Ok");
+	}
+
+	printProjectComparison(cpResults, resultSet);
+	appendProjectResultsToOutputFile(cpResults, resultSet);
 	
-	printComparison(cpResults, libResults, resultSet);
-    appendToOutputFile(cpResults, libResults, resultSet);	
+	
+	countPackagePrivateClasses(library, cpModel);
+
+    if(!skipLibraries) {
+
+		printLibrariesComparison(libResults, resultSet);
+		appendLibrariesResultsToOutputFile(libResults, resultSet);
+	}
 	
 	println("");
 	println("    Library running time: <formatDuration(now() - startTime)>");
@@ -181,13 +195,30 @@ public str formatDuration(Duration duration)
 }
 
 
-public void countPackagePrivateClasses(M3 cpModel) 
+public void countPackagePrivateClasses(Library library, M3 model) 
 {
-    int project_classCount = size(classes(cpModel));
-    int project_publicClassCount = size( { c | <c,m> <- cpModel.modifiers, isClass(c) && m == \public() } );
-    int project_packageVisibleClassCount = project_classCount - project_publicClassCount;
+    packageVisibleClasses = classes(model) - { c | <c,m> <- model.modifiers, isClass(c) && m == \public() };
     
-    real project_packageVisibleClassPercentage = project_packageVisibleClassCount / toReal(project_classCount) * 100;
+    int classCount = size(classes(model));
+    int packageVisibleClassCount = size(packageVisibleClasses);
+    real packageVisibleClassPercentage = round(size(packageVisibleClasses) / toReal(classCount) * 100, 0.1);
+    
+    str packageVisibleClassPercentageStr = replaceAll(toString(packageVisibleClassPercentage), ".", ",");
+
+    packageVisibleClassMethods = { m | <c,m> <- model.containment, c in packageVisibleClasses }; 
+    
+    // The more package visible classes, the more escape analysis will be effective.
+    
+    // The more calls to JavaObject methods on instances of package visible classes
+    packageVisibleClassMethodInvocations = { <from,to> | <from,to> <- model.methodInvocation, to in packageVisibleClassMethods };
+    
+    println("Package visible classes:       <packageVisibleClassCount>");
+    println("Package visible classes (%):   <packageVisibleClassPercentage>");
+    println("Package visible class methods: <size(packageVisibleClassMethods)>");
+    
+    println("Method invocations:            <size(packageVisibleClassMethodInvocations)>");
+
+    appendToFile(packageVisibleFile, "<library.organisation>;<library.name>;<library.revision>;<classCount>;<packageVisibleClassCount>;<packageVisibleClassPercentageStr>%\r\n");
 }
 
 
@@ -246,7 +277,7 @@ public M3Result countElements(M3 model)
 }
 
 
-public void printComparison(M3Result cpResults, M3Result libResults, Result resultSet) 
+public void printProjectComparison(M3Result cpResults, Result resultSet) 
 {
     println();
     printStat("Project class count", cpResults.classCount, resultSet.project_classCount); 
@@ -266,6 +297,11 @@ public void printComparison(M3Result cpResults, M3Result libResults, Result resu
     printStat("Project protected method count", cpResults.protectedMethods, resultSet.project_protectedMethods); 
     printStat("Project package private method count", cpResults.packagePrivateMethods, resultSet.project_packagePrivateMethods); 
     printStat("Project private method count", cpResults.privateMethods, resultSet.project_privateMethods);
+    println();
+}
+
+public void printLibrariesComparison(M3Result libResults, Result resultSet) 
+{
     println();
     printStat("Libraries class count", libResults.classCount, resultSet.libraries_classCount); 
     printStat("Libraries public class count", libResults.publicClassCount, resultSet.libraries_publicClassCount); 
@@ -301,7 +337,7 @@ public void printStat(str description, int value1, int value2)
 }
 
 
-public void appendToOutputFile(M3Result cpResults, M3Result libResults, Result resultSet) 
+public void appendProjectResultsToOutputFile(M3Result cpResults, Result resultSet) 
 {
     appendToFile(differencesFile, "<resultSet.organisation> <resultSet.name> <resultSet.revision>;;\r\n"); 
     appendToFile(differencesFile, "Project class count;<cpResults.classCount>;<resultSet.project_classCount>\r\n"); 
@@ -319,6 +355,10 @@ public void appendToOutputFile(M3Result cpResults, M3Result libResults, Result r
     appendToFile(differencesFile, "Project protected method count;<cpResults.protectedMethods>;<resultSet.project_protectedMethods>\r\n"); 
     appendToFile(differencesFile, "Project package private method count;<cpResults.packagePrivateMethods>;<resultSet.project_packagePrivateMethods>\r\n"); 
     appendToFile(differencesFile, "Project private method count;<cpResults.privateMethods>;<resultSet.project_privateMethods>\r\n");
+}
+
+public void appendLibrariesResultToOutputFile(M3Result libResults, Result resultSet) 
+{
     appendToFile(differencesFile, "Libraries class count;<libResults.classCount>;<resultSet.libraries_classCount>\r\n"); 
     appendToFile(differencesFile, "Libraries public class count;<libResults.publicClassCount>;<resultSet.libraries_publicClassCount>\r\n"); 
     appendToFile(differencesFile, "Libraries package visible count;<libResults.packageVisibleClassCount>;<resultSet.libraries_packageVisibleClassCount>\r\n");
@@ -335,6 +375,29 @@ public void appendToOutputFile(M3Result cpResults, M3Result libResults, Result r
     appendToFile(differencesFile, "Libraries package private method count;<libResults.packagePrivateMethods>;<resultSet.libraries_packagePrivateMethods>\r\n"); 
     appendToFile(differencesFile, "Libraries private method count;<libResults.privateMethods>;<resultSet.libraries_privateMethods>\r\n");
 }
+
+
+
+public M3 repairM3(M3 model) 
+{
+    declaredMethod = { <toLocation(replaceAll(m.uri, "$", "/")), m> | m <- methods(model) };
+
+	unDeclaredMethod = { <m, toLocation(replaceAll(m.uri, "$", "/"))> | m <- carrier(model.methodInvocation)  };
+
+    correctionMap = unDeclaredMethod o declaredMethod;
+
+    uncorrectableMethods = carrier(model.methodInvocation) - domain(correctionMap);
+    correctionMap += { <old,old> | old <- uncorrectableMethods };
+
+    // Correct the domain of the methodInvocarion relation.        
+    model.methodInvocation = invert(correctionMap) o  model.methodInvocation;
+    // Correct the range of the methodInvocarion relation.
+    model.methodInvocation = model.methodInvocation o correctionMap;
+  
+    return model;
+}
+
+
 
 public void validateM3(M3 model) 
 {
