@@ -21,5 +21,5 @@ import main::rta::Util;
 M3 m3RtaCase = createM3FromEclipseProject(|project://RtaCase|);
 M3 m3RtaCase2 = createM3FromEclipseProject(|project://RtaCase2|);
 M3 m3TestCases = createM3FromEclipseProject(|project://TestCases|);
-
+  
 M3 model1 = createM3FromDirectory(|file:///C:/Users/Erik/OneDrive/Mijn%20documenten/ThesisWS/TestCases/src|);

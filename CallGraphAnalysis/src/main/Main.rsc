@@ -43,7 +43,8 @@ alias M3Result = tuple[
     int publicMethods,
     int protectedMethods,
     int privateMethods,
-    int packagePrivateMethods
+    int packagePrivateMethods,
+    int objectMethodInvocation
 ];
 
 public void analyseJars() 
@@ -79,7 +80,7 @@ public void analyseJars(list[int] libraryIdentifiers)
     writeFile(differencesFile, "<header>\r\n");
 
     // Create an output file for package visibility 
-    header = "organisation;name;revision;public_classes;package_visible_classes;percentage";
+    header = "organisation;name;revision;public_classes;package_visible_classes;percentage;object_method_invocation";
     writeFile(packageVisibleFile, "<header>\r\n");
 
 	for(library <- TestDataSet, library.id in libraryIdentifiers) 
@@ -132,10 +133,10 @@ public void analyseJar(Library library, Result resultSet, M3 jdkModel)
 	}
 
 	printProjectComparison(cpResults, resultSet);
+
 	appendProjectResultsToOutputFile(cpResults, resultSet);
 	
-	
-	countPackagePrivateClasses(library, cpModel);
+	appendPackageVisibilityToOutputFile(library, cpResults);
 
     if(!skipLibraries) {
 
@@ -195,30 +196,11 @@ public str formatDuration(Duration duration)
 }
 
 
-public void countPackagePrivateClasses(Library library, M3 model) 
+public void appendPackageVisibilityToOutputFile(Library library, M3Result results) 
 {
-    packageVisibleClasses = classes(model) - { c | <c,m> <- model.modifiers, isClass(c) && m == \public() };
-    
-    int classCount = size(classes(model));
-    int packageVisibleClassCount = size(packageVisibleClasses);
-    real packageVisibleClassPercentage = round(size(packageVisibleClasses) / toReal(classCount) * 100, 0.1);
-    
-    str packageVisibleClassPercentageStr = replaceAll(toString(packageVisibleClassPercentage), ".", ",");
+    str packageVisibleClassPercentageStr = replaceAll(toString(results.packageVisibleClassPercentage), ".", ",");
 
-    packageVisibleClassMethods = { m | <c,m> <- model.containment, c in packageVisibleClasses }; 
-    
-    // The more package visible classes, the more escape analysis will be effective.
-    
-    // The more calls to JavaObject methods on instances of package visible classes
-    packageVisibleClassMethodInvocations = { <from,to> | <from,to> <- model.methodInvocation, to in packageVisibleClassMethods };
-    
-    println("Package visible classes:       <packageVisibleClassCount>");
-    println("Package visible classes (%):   <packageVisibleClassPercentage>");
-    println("Package visible class methods: <size(packageVisibleClassMethods)>");
-    
-    println("Method invocations:            <size(packageVisibleClassMethodInvocations)>");
-
-    appendToFile(packageVisibleFile, "<library.organisation>;<library.name>;<library.revision>;<classCount>;<packageVisibleClassCount>;<packageVisibleClassPercentageStr>%\r\n");
+    appendToFile(packageVisibleFile, "<library.organisation>;<library.name>;<library.revision>;<results.classCount>;<results.packageVisibleClassCount>;<packageVisibleClassPercentageStr>%;<results.objectMethodInvocation>\r\n");
 }
 
 
@@ -248,6 +230,8 @@ public M3Result countElements(M3 model)
     int privateMethods = size( { me | <me,m> <- model.modifiers, isMethod(me) && m == \private() } );
     int packagePrivateMethods = methodCount - publicMethods - protectedMethods - privateMethods;
     
+    int objectMethodInvocation = size({ <x,y> | <x,y> <- model.methodInvocation, contains(y.path, "/java/lang/Object/") && !isConstructor(y) });
+    
     if(countEnumsAsClasses) 
     {
         classCount += enumCount;
@@ -272,7 +256,8 @@ public M3Result countElements(M3 model)
         publicMethods,
         protectedMethods,
         privateMethods,
-        packagePrivateMethods
+        packagePrivateMethods,
+        objectMethodInvocation
     >;
 }
 
