@@ -27,6 +27,7 @@ public loc packageVisibleFile = |file:///C:/CallGraphData/packageVisible.csv|;
 
 alias M3Result = tuple[
     loc modelId,
+    // Class count
     int classCount,
     int publicClassCount,
     int packagePrivateClassCount,
@@ -36,10 +37,22 @@ alias M3Result = tuple[
     int privateNestedClassCount,
     int packagePrivateNestedClassCount,
     real packagePrivateClassPercentage,
+    // Enum count
+    int enumCount,
+    int publicEnumCount,
+    int packagePrivateEnumCount,
+    int nestedEnumCount,
+    int publicNestedEnumCount,
+    int protectedNestedEnumCount,
+    int privateNestedEnumCount,
+    int packagePrivateNestedEnumCount,
+    // Package count
     int packagesWithPackagePrivateClasses,
+    // Interface count
     int interfaceCount,
     int publicInterfaceCount,
     int packagePrivateInterfaceCount,
+    // Method count
     int methodCount,
     int publicMethods,
     int protectedMethods,
@@ -147,6 +160,7 @@ public void analyseJar(Library library, Result resultSet, M3 jdkModel)
 	
 	println("");
 	println("    Library running time: <formatDuration(now() - startTime)>");
+    println("------------------------------------------------------------------------");
 }
 
 public M3 createM3FromLocation(loc location) 
@@ -163,6 +177,11 @@ public M3 createM3FromJars(loc modelId, list[loc] jarFiles)
 	set[M3] models = { createM3FromJar(jar) | jar <- jarFiles };
 	
 	return composeM3(modelId, models);
+}
+
+public M3 loadLib(int libraryId) 
+{
+    return createM3FromJar(libraryFolder + TestDataSet[libraryId].cpFile);
 }
 
 public list[loc] findJars(loc location)
@@ -207,11 +226,11 @@ public void appendPackageVisibilityToOutputFile(Library library, M3Result result
 
 public M3Result countElements(M3 model) 
 {
-    int classCount = size(classes(model) + enums(model));
+    set[loc] allClasses = classes(model);
+    int classCount = size(allClasses);
     
     // Inner classes, static nested classes, anonymous classes and local classes.
-    set[loc] nestedClasses = { class | <container, class> <- model.containment, 
-        (isClass(class) || isEnum(class)) && (isMethod(container) || isClass(container)) };
+    set[loc] nestedClasses = { class | <container, class> <- model.containment, (isMethod(container) || isClass(container)) && class in allClasses };
     // Divide the nested classes in public, protected, package-private and private classes.
     set[loc] publicNestedClasses = { class | class <- nestedClasses, <class,\public()> in model.modifiers };
     set[loc] protectedNestedClasses = { class | class <- nestedClasses, <class,\protected()> in model.modifiers };
@@ -219,7 +238,7 @@ public M3Result countElements(M3 model)
     set[loc] packagePrivateNestedClasses = nestedClasses - publicNestedClasses - protectedNestedClasses - privateNestedClasses; 
     
     // Outer classes  
-    set[loc] outerClasses = { class | class <- classes(model) + enums(model), class notin nestedClasses };
+    set[loc] outerClasses = allClasses - nestedClasses;
     // Divide the outer classes in public classes and package-private classes.
     set[loc] publicClasses = { class | class <- outerClasses, <class,\public()> in model.modifiers }; 
     set[loc] packagePrivateClasses = outerClasses - publicClasses;
@@ -232,8 +251,29 @@ public M3Result countElements(M3 model)
         packagePrivateClassPercentage = packagePrivateClassCount / toReal(classCount) * 100;
     }
 
+    // Enumerations
+    set[loc] allEnums = enums(model);
+    
+    // Nested enums
+    set[loc] nestedEnums = { enum | <container, enum> <- model.containment, (isMethod(container) || isClass(container)) && enum in allEnums };
+    // Divide the nested enums in public, protected, package-private and private enums.
+    set[loc] publicNestedEnums = { enum | enum <- nestedEnums, <enum,\public()> in model.modifiers };
+    set[loc] protectedNestedEnums = { enum | enum <- nestedEnums, <enum,\protected()> in model.modifiers };
+    set[loc] privateNestedEnums = { enum | enum <- nestedEnums, <enum,\private()> in model.modifiers };
+    set[loc] packagePrivateNestedEnums = nestedEnums - publicNestedEnums - protectedNestedEnums - privateNestedEnums; 
+    
+    // Outer enums  
+    set[loc] outerEnums = allEnums - nestedEnums;
+    // Divide the outer classes in public classes and package-private classes.
+    set[loc] publicEnums = { enum | enum <- outerEnums, <enum,\public()> in model.modifiers }; 
+    set[loc] packagePrivateEnums = outerEnums - publicEnums;
+    
+
+
     int packagesWithPackagePrivateClasses = size({ <package> | <package,class> <-  model.containment o model.containment, 
         isPackage(package) && class in packagePrivateClasses });
+        
+    int enumCount = size(enums(model));
 
     int interfaceCount = size(interfaces(model));
     int publicInterfaceCount = size( { i | <i,m> <- model.modifiers, isInterface(i) && m == \public() } );
@@ -249,7 +289,7 @@ public M3Result countElements(M3 model)
     
     return <
         model.id,
-        classCount,
+        size(allClasses),
         publicClassCount,
         packagePrivateClassCount,
         size(nestedClasses),
@@ -258,6 +298,14 @@ public M3Result countElements(M3 model)
         size(privateNestedClasses),
         size(packagePrivateNestedClasses),
         packagePrivateClassPercentage,
+        enumCount,
+        size(publicEnums),
+        size(packagePrivateEnums),
+        size(nestedEnums),
+        size(publicNestedEnums),
+        size(protectedNestedEnums),
+        size(privateNestedEnums),
+        size(packagePrivateNestedEnums),
         packagesWithPackagePrivateClasses,
         interfaceCount,
         publicInterfaceCount,
@@ -274,20 +322,36 @@ public M3Result countElements(M3 model)
 
 public void printProjectComparison(M3Result cpResults, Result resultSet) 
 {
-    int totalPublicClassCount = cpResults.publicClassCount + cpResults.publicNestedClassCount + cpResults.protectedNestedClassCount;
-    int totalPackagePrivateClassCount = cpResults.packagePrivateClassCount + cpResults.packagePrivateNestedClassCount+ cpResults.privateNestedClassCount;
+    int totalPublicClassCount = cpResults.publicClassCount + cpResults.publicNestedClassCount + cpResults.protectedNestedClassCount
+        + cpResults.publicEnumCount + cpResults.publicNestedEnumCount + cpResults.protectedNestedEnumCount;
+    int totalPackagePrivateClassCount = cpResults.packagePrivateClassCount + cpResults.packagePrivateNestedClassCount+ cpResults.privateNestedClassCount
+        + cpResults.packagePrivateEnumCount + cpResults.packagePrivateNestedEnumCount + cpResults.privateNestedEnumCount;
 
     println();
-    printStat("Project class count", cpResults.classCount, resultSet.project_classCount);
-    printStat("Project outer class count",  cpResults.publicClassCount + cpResults.packagePrivateClassCount );
+    printStat("Project class count", cpResults.classCount);
+    printStat("  Project outer class count",  cpResults.publicClassCount + cpResults.packagePrivateClassCount );
+    printStat("    Public outer class count", cpResults.publicClassCount);
+    printStat("    Package-private class count", cpResults.packagePrivateClassCount);
+    printStat("  Project nested class count", cpResults.nestedClassCount);
+    printStat("    Public nested class count", cpResults.publicNestedClassCount);
+    printStat("    Protected nested class count", cpResults.protectedNestedClassCount);
+    printStat("    Package-private nested class count", cpResults.packagePrivateNestedClassCount);
+    printStat("    Private nested class count", cpResults.privateNestedClassCount);
+
+    printStat("Project enum count", cpResults.enumCount);
+    printStat("  Project outer enum count",  cpResults.publicEnumCount + cpResults.packagePrivateEnumCount );
+    printStat("    Public outer enum count", cpResults.publicEnumCount);
+    printStat("    Package-private enum count", cpResults.packagePrivateEnumCount);
+    printStat("  Project nested enum count", cpResults.nestedEnumCount);
+    printStat("    Public nested enum count", cpResults.publicNestedEnumCount);
+    printStat("    Protected nested enum count", cpResults.protectedNestedEnumCount);
+    printStat("    Package-private nested enum count", cpResults.packagePrivateNestedEnumCount);
+    printStat("    Private nested enum count", cpResults.privateNestedEnumCount);
+
+    printStat("Project total class count", cpResults.classCount + cpResults.enumCount, resultSet.project_classCount);
     printStat("Project public class count", totalPublicClassCount, resultSet.project_publicClassCount); 
     printStat("Project package private count", totalPackagePrivateClassCount, resultSet.project_packageVisibleClassCount);
-    printStat("Project nested class count", cpResults.nestedClassCount);
-    printStat("Project public nested class count", cpResults.publicNestedClassCount);
-    printStat("Project protected nested class count", cpResults.protectedNestedClassCount);
-    printStat("Project package-private nested class count", cpResults.packagePrivateNestedClassCount);
-    printStat("Project private nested class count", cpResults.privateNestedClassCount);
-    println("    Project package visible class percentage :  <right("<round(cpResults.packagePrivateClassPercentage, 0.1)>", 6)> %");
+    println("    Project package visible class percentage     :  <right("<round(cpResults.packagePrivateClassPercentage, 0.1)>", 6)> %");
     println();
     printStat("Project interface count", cpResults.interfaceCount, resultSet.project_interfaceCount); 
     printStat("Project public interface count", cpResults.publicInterfaceCount, resultSet.project_publicInterfaceCount); 
@@ -323,7 +387,7 @@ public void printLibrariesComparison(M3Result libResults, Result resultSet)
 
 public void printStat(str description, int value1) 
 {
-    println("    <left(description, 41, " ")>:  <right("<value1>", 6, " ")>");
+    println("    <left(description, 45, " ")>:  <right("<value1>", 6, " ")>");
 }
 
 public void printStat(str description, int value1, int value2) 
@@ -331,7 +395,7 @@ public void printStat(str description, int value1, int value2)
     int diff = value1 - value2;
     str diffText = (diff > 0) ? "+<diff>" : (diff < 0) ? "<diff>" : "";
     
-    println("    <left(description, 41, " ")>:  <right("<value1>", 6, " ")>  <right("<value2>", 6, " ")>  <right(diffText, 6, " ")>");
+    println("    <left(description, 45, " ")>:  <right("<value1>", 6, " ")>  <right("<value2>", 6, " ")>  <right(diffText, 6, " ")>");
 }
 
 
