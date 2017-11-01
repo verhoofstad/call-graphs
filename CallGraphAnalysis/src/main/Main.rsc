@@ -15,7 +15,7 @@ import main::results::ResultSet;
 import main::results::LoadResults;
 
 // Options
-public bool skipLibraries = true;
+public bool skipLibraries = false;
 
 // Environmental settings
 public loc libraryFolder = |file:///C:/CallGraphData/Libraries|;
@@ -128,8 +128,10 @@ public void analyseJar(Library library, Result resultSet, M3 jdkModel)
 	println("Ok");
 
     print("    Counting code elements in CP Model...");
-	cpResults = countElements(cpModel);
+	cpResults = countElementsQuick(cpModel);
 	println("Ok");
+	
+	M3Result libResults;
 	
     if(!skipLibraries) {
 
@@ -142,7 +144,7 @@ public void analyseJar(Library library, Result resultSet, M3 jdkModel)
 		println("Ok");
 
 		print("    Counting code elements in Libraries...");
-	    libResults = countElements(libModel);
+	    libResults = countElementsQuick(libModel);
 	    println("Ok");
 	}
 
@@ -155,7 +157,7 @@ public void analyseJar(Library library, Result resultSet, M3 jdkModel)
     if(!skipLibraries) {
 
 		printLibrariesComparison(libResults, resultSet);
-		appendLibrariesResultsToOutputFile(libResults, resultSet);
+		appendLibrariesResultToOutputFile(libResults, resultSet);
 	}
 	
 	println("");
@@ -223,6 +225,74 @@ public void appendPackageVisibilityToOutputFile(Library library, M3Result result
     appendToFile(packageVisibleFile, "<library.organisation>;<library.name>;<library.revision>;<results.classCount>;<results.packagePrivateClassCount>;<packagePrivateClassPercentageStr>%;<results.packagesWithPackagePrivateClasses>;<results.objectMethodInvocation>\r\n");
 }
 
+public M3Result countElementsQuick(M3 model) 
+{
+    int classCount = size(classes(model));
+    int publicClassCount = size( { c | <c,m> <- model.modifiers, isClass(c) && m == \public() } );
+    int packagePrivateClassCount = classCount - publicClassCount;
+    
+    real packagePrivateClassPercentage = 0.0;
+    if(classCount > 0) {
+        packagePrivateClassPercentage = packagePrivateClassCount / toReal(classCount) * 100;
+    }
+
+    int enumCount = size(enums(model));
+    int publicEnumCount = size( { e | <e,m> <- model.modifiers, isEnum(e) && m == \public() } );
+    int privateEnumCount = size( { e | <e,m> <- model.modifiers, isEnum(e) && m == \private() } );
+    int packagePrivateEnumCount = enumCount - publicEnumCount - privateEnumCount;
+
+    int interfaceCount = size(interfaces(model));
+    int publicInterfaceCount = size( { i | <i,m> <- model.modifiers, isInterface(i) && m == \public() } );
+    int packageVisibleInterfaceCount = interfaceCount - publicInterfaceCount;
+
+    int methodCount = size(methods(model));
+    int publicMethods = size( { me | <me,m> <- model.modifiers, isMethod(me) && m == \public() } );
+    int protectedMethods = size( { me | <me,m> <- model.modifiers, isMethod(me) && m == \protected() } );
+    int privateMethods = size( { me | <me,m> <- model.modifiers, isMethod(me) && m == \private() } );
+    int packagePrivateMethods = methodCount - publicMethods - protectedMethods - privateMethods;
+    
+    //int objectMethodInvocation = size({ <x,y> | <x,y> <- model.methodInvocation, contains(y.path, "/java/lang/Object/") && !isConstructor(y) });
+
+/*    
+    if(countEnumsAsClasses) 
+    {
+        classCount += enumCount;
+        publicClassCount += publicEnumCount;
+        packagePrivateClassCount += packagePrivateEnumCount;
+    }
+*/
+    
+    return <
+        model.id,
+        classCount,
+        publicClassCount,
+        packagePrivateClassCount,
+        0, //size(nestedClasses),
+        0, //size(publicNestedClasses),
+        0, //size(protectedNestedClasses),
+        0, //size(privateNestedClasses),
+        0, //size(packagePrivateNestedClasses),
+        packagePrivateClassPercentage,
+        enumCount,
+        publicEnumCount,
+        packagePrivateEnumCount,
+        0, // size(nestedEnums),
+        0, //size(publicNestedEnums),
+        0, //size(protectedNestedEnums),
+        0, //size(privateNestedEnums),
+        0, //size(packagePrivateNestedEnums),
+        0, //packagesWithPackagePrivateClasses,
+        interfaceCount,
+        publicInterfaceCount,
+        packageVisibleInterfaceCount,
+        methodCount,
+        publicMethods,
+        protectedMethods,
+        privateMethods,
+        packagePrivateMethods,
+        0 //objectMethodInvocation
+    >;
+}
 
 public M3Result countElements(M3 model) 
 {
@@ -328,6 +398,7 @@ public void printProjectComparison(M3Result cpResults, Result resultSet)
         + cpResults.packagePrivateEnumCount + cpResults.packagePrivateNestedEnumCount + cpResults.privateNestedEnumCount;
 
     println();
+    /*
     printStat("Project class count", cpResults.classCount);
     printStat("  Project outer class count",  cpResults.publicClassCount + cpResults.packagePrivateClassCount );
     printStat("    Public outer class count", cpResults.publicClassCount);
@@ -347,7 +418,7 @@ public void printProjectComparison(M3Result cpResults, Result resultSet)
     printStat("    Protected nested enum count", cpResults.protectedNestedEnumCount);
     printStat("    Package-private nested enum count", cpResults.packagePrivateNestedEnumCount);
     printStat("    Private nested enum count", cpResults.privateNestedEnumCount);
-
+    */
     printStat("Project total class count", cpResults.classCount + cpResults.enumCount, resultSet.project_classCount);
     printStat("Project public class count", totalPublicClassCount, resultSet.project_publicClassCount); 
     printStat("Project package private count", totalPackagePrivateClassCount, resultSet.project_packageVisibleClassCount);
@@ -367,11 +438,16 @@ public void printProjectComparison(M3Result cpResults, Result resultSet)
 
 public void printLibrariesComparison(M3Result libResults, Result resultSet) 
 {
+    int totalPublicClassCount = libResults.publicClassCount + libResults.publicNestedClassCount + libResults.protectedNestedClassCount
+        + libResults.publicEnumCount + libResults.publicNestedEnumCount + libResults.protectedNestedEnumCount;
+    int totalPackagePrivateClassCount = libResults.packagePrivateClassCount + libResults.packagePrivateNestedClassCount+ libResults.privateNestedClassCount
+        + libResults.packagePrivateEnumCount + libResults.packagePrivateNestedEnumCount + libResults.privateNestedEnumCount;
+
     println();
-    printStat("Libraries class count", libResults.classCount, resultSet.libraries_classCount); 
-    printStat("Libraries public class count", libResults.publicClassCount, resultSet.libraries_publicClassCount); 
-    printStat("Libraries package visible count", libResults.packagePrivateClassCount, resultSet.libraries_packageVisibleClassCount);
-    println("    Libraries package visible class percentage:  <right("<round(cpResults.packagePrivateClassPercentage, 0.1)>", 6)> %");
+    printStat("Libraries class count", libResults.classCount + libResults.enumCount, resultSet.libraries_classCount); 
+    printStat("Libraries public class count", totalPublicClassCount, resultSet.libraries_publicClassCount); 
+    printStat("Libraries package visible count", totalPackagePrivateClassCount, resultSet.libraries_packageVisibleClassCount);
+    println("    Libraries package visible class percentage:  <right("<round(libResults.packagePrivateClassPercentage, 0.1)>", 6)> %");
     println();
     printStat("Libraries interface count", libResults.interfaceCount, resultSet.libraries_interfaceCount); 
     printStat("Libraries public interface count", libResults.publicInterfaceCount, resultSet.libraries_publicInterfaceCount); 
@@ -421,7 +497,7 @@ public void appendLibrariesResultToOutputFile(M3Result libResults, Result result
     appendToFile(differencesFile, "Libraries class count;<libResults.classCount>;<resultSet.libraries_classCount>\r\n"); 
     appendToFile(differencesFile, "Libraries public class count;<libResults.publicClassCount>;<resultSet.libraries_publicClassCount>\r\n"); 
     appendToFile(differencesFile, "Libraries package visible count;<libResults.packagePrivateClassCount>;<resultSet.libraries_packageVisibleClassCount>\r\n");
-    appendToFile(differencesFile, "Libraries package visible class percentage;<cpResults.packagePrivateClassPercentage>\r\n");
+    appendToFile(differencesFile, "Libraries package visible class percentage;<libResults.packagePrivateClassPercentage>\r\n");
     appendToFile(differencesFile, "Libraries interface count;<libResults.interfaceCount>;<resultSet.libraries_interfaceCount>\r\n"); 
     appendToFile(differencesFile, "Libraries public interface count;<libResults.publicInterfaceCount>;<resultSet.libraries_publicInterfaceCount>\r\n"); 
     appendToFile(differencesFile, "Libraries package visible interface count;<libResults.packagePrivateInterfaceCount>;<resultSet.libraries_packageVisibleInterfaceCount>\r\n"); 
