@@ -15,7 +15,7 @@ import main::results::ResultSet;
 import main::results::LoadResults;
 
 // Options
-public bool skipLibraries = false;
+public bool skipLibraries = true;
 
 // Environmental settings
 public loc libraryFolder = |file:///C:/CallGraphData/Libraries|;
@@ -58,6 +58,8 @@ alias M3Result = tuple[
     int protectedMethods,
     int privateMethods,
     int packagePrivateMethods,
+    int volatileMethods,
+    int publicVolatileMethods,
     int objectMethodInvocation
 ];
 
@@ -128,7 +130,7 @@ public void analyseJar(Library library, Result resultSet, M3 jdkModel)
 	println("Ok");
 
     print("    Counting code elements in CP Model...");
-	cpResults = countElementsQuick(cpModel);
+	cpResults = countElements(cpModel);
 	println("Ok");
 	
 	M3Result libResults;
@@ -144,7 +146,7 @@ public void analyseJar(Library library, Result resultSet, M3 jdkModel)
 		println("Ok");
 
 		print("    Counting code elements in Libraries...");
-	    libResults = countElementsQuick(libModel);
+	    libResults = countElements(libModel);
 	    println("Ok");
 	}
 
@@ -185,6 +187,7 @@ public M3 loadLib(int libraryId)
 {
     return createM3FromJar(libraryFolder + TestDataSet[libraryId].cpFile);
 }
+public list[int] smallJars() = [2..99] - [3] - [25];
 
 public list[loc] findJars(loc location)
 {
@@ -225,74 +228,6 @@ public void appendPackageVisibilityToOutputFile(Library library, M3Result result
     appendToFile(packageVisibleFile, "<library.organisation>;<library.name>;<library.revision>;<results.classCount>;<results.packagePrivateClassCount>;<packagePrivateClassPercentageStr>%;<results.packagesWithPackagePrivateClasses>;<results.objectMethodInvocation>\r\n");
 }
 
-public M3Result countElementsQuick(M3 model) 
-{
-    int classCount = size(classes(model));
-    int publicClassCount = size( { c | <c,m> <- model.modifiers, isClass(c) && m == \public() } );
-    int packagePrivateClassCount = classCount - publicClassCount;
-    
-    real packagePrivateClassPercentage = 0.0;
-    if(classCount > 0) {
-        packagePrivateClassPercentage = packagePrivateClassCount / toReal(classCount) * 100;
-    }
-
-    int enumCount = size(enums(model));
-    int publicEnumCount = size( { e | <e,m> <- model.modifiers, isEnum(e) && m == \public() } );
-    int privateEnumCount = size( { e | <e,m> <- model.modifiers, isEnum(e) && m == \private() } );
-    int packagePrivateEnumCount = enumCount - publicEnumCount - privateEnumCount;
-
-    int interfaceCount = size(interfaces(model));
-    int publicInterfaceCount = size( { i | <i,m> <- model.modifiers, isInterface(i) && m == \public() } );
-    int packageVisibleInterfaceCount = interfaceCount - publicInterfaceCount;
-
-    int methodCount = size(methods(model));
-    int publicMethods = size( { me | <me,m> <- model.modifiers, isMethod(me) && m == \public() } );
-    int protectedMethods = size( { me | <me,m> <- model.modifiers, isMethod(me) && m == \protected() } );
-    int privateMethods = size( { me | <me,m> <- model.modifiers, isMethod(me) && m == \private() } );
-    int packagePrivateMethods = methodCount - publicMethods - protectedMethods - privateMethods;
-    
-    //int objectMethodInvocation = size({ <x,y> | <x,y> <- model.methodInvocation, contains(y.path, "/java/lang/Object/") && !isConstructor(y) });
-
-/*    
-    if(countEnumsAsClasses) 
-    {
-        classCount += enumCount;
-        publicClassCount += publicEnumCount;
-        packagePrivateClassCount += packagePrivateEnumCount;
-    }
-*/
-    
-    return <
-        model.id,
-        classCount,
-        publicClassCount,
-        packagePrivateClassCount,
-        0, //size(nestedClasses),
-        0, //size(publicNestedClasses),
-        0, //size(protectedNestedClasses),
-        0, //size(privateNestedClasses),
-        0, //size(packagePrivateNestedClasses),
-        packagePrivateClassPercentage,
-        enumCount,
-        publicEnumCount,
-        packagePrivateEnumCount,
-        0, // size(nestedEnums),
-        0, //size(publicNestedEnums),
-        0, //size(protectedNestedEnums),
-        0, //size(privateNestedEnums),
-        0, //size(packagePrivateNestedEnums),
-        0, //packagesWithPackagePrivateClasses,
-        interfaceCount,
-        publicInterfaceCount,
-        packageVisibleInterfaceCount,
-        methodCount,
-        publicMethods,
-        protectedMethods,
-        privateMethods,
-        packagePrivateMethods,
-        0 //objectMethodInvocation
-    >;
-}
 
 public M3Result countElements(M3 model) 
 {
@@ -349,11 +284,17 @@ public M3Result countElements(M3 model)
     int publicInterfaceCount = size( { i | <i,m> <- model.modifiers, isInterface(i) && m == \public() } );
     int packageVisibleInterfaceCount = interfaceCount - publicInterfaceCount;
 
-    int methodCount = size(methods(model));
-    int publicMethods = size( { me | <me,m> <- model.modifiers, isMethod(me) && m == \public() } );
-    int protectedMethods = size( { me | <me,m> <- model.modifiers, isMethod(me) && m == \protected() } );
-    int privateMethods = size( { me | <me,m> <- model.modifiers, isMethod(me) && m == \private() } );
+    set[loc] allMethods = { m | <m,_> <- model.declarations, isMethod(m) || m.scheme == "java+initializer" };
+    rel[loc,Modifier] methodModifiers = { <me,m> | <me,m> <- model.modifiers, me in allMethods };
+    
+    int methodCount = size(allMethods);
+    int publicMethods = size( { me | <me,m> <- methodModifiers, m == \public() } );
+    int protectedMethods = size( { me | <me,m> <- methodModifiers, m == \protected() } );
+    int privateMethods = size( { me | <me,m> <- methodModifiers, m == \private() } );
     int packagePrivateMethods = methodCount - publicMethods - protectedMethods - privateMethods;
+    
+    set[loc] allVolatileMethods = { me | <me,m> <- methodModifiers, m == \volatile() };
+    set[loc] publicVolatileMethods = { me | <me,m> <- methodModifiers, m == \public() && me in allVolatileMethods };
     
     int objectMethodInvocation = size({ <x,y> | <x,y> <- model.methodInvocation, contains(y.path, "/java/lang/Object/") && !isConstructor(y) });
     
@@ -385,6 +326,8 @@ public M3Result countElements(M3 model)
         protectedMethods,
         privateMethods,
         packagePrivateMethods,
+        size(allVolatileMethods),
+        size(publicVolatileMethods),
         objectMethodInvocation
     >;
 }
@@ -398,7 +341,6 @@ public void printProjectComparison(M3Result cpResults, Result resultSet)
         + cpResults.packagePrivateEnumCount + cpResults.packagePrivateNestedEnumCount + cpResults.privateNestedEnumCount;
 
     println();
-    /*
     printStat("Project class count", cpResults.classCount);
     printStat("  Project outer class count",  cpResults.publicClassCount + cpResults.packagePrivateClassCount );
     printStat("    Public outer class count", cpResults.publicClassCount);
@@ -418,7 +360,7 @@ public void printProjectComparison(M3Result cpResults, Result resultSet)
     printStat("    Protected nested enum count", cpResults.protectedNestedEnumCount);
     printStat("    Package-private nested enum count", cpResults.packagePrivateNestedEnumCount);
     printStat("    Private nested enum count", cpResults.privateNestedEnumCount);
-    */
+
     printStat("Project total class count", cpResults.classCount + cpResults.enumCount, resultSet.project_classCount);
     printStat("Project public class count", totalPublicClassCount, resultSet.project_publicClassCount); 
     printStat("Project package private count", totalPackagePrivateClassCount, resultSet.project_packageVisibleClassCount);
@@ -433,6 +375,9 @@ public void printProjectComparison(M3Result cpResults, Result resultSet)
     printStat("Project protected method count", cpResults.protectedMethods, resultSet.project_protectedMethods); 
     printStat("Project package private method count", cpResults.packagePrivateMethods, resultSet.project_packagePrivateMethods); 
     printStat("Project private method count", cpResults.privateMethods, resultSet.project_privateMethods);
+    printStat("Project volatile method count", cpResults.volatileMethods);
+    printStat("Project public volatile method count", cpResults.publicVolatileMethods);
+    
     println();
 }
 
@@ -527,6 +472,16 @@ public M3 repairM3(M3 model)
     model.methodInvocation = model.methodInvocation o correctionMap;
   
     return model;
+}
+
+
+public M3 repairM3For1129(M3 model) 
+{
+    set[loc] undeclaredMethods = range(model.methodInvocation) - domain(model.declarations);
+    
+    classesAndMethods = { <m, |java+class:///| + m.parent.path, m.file> | m <- undeclaredMethods };
+    
+        
 }
 
 
