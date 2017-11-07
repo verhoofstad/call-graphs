@@ -6,6 +6,8 @@ import util::Math;
 import lang::java::m3::Core;
 import lang::java::m3::AST;
 import lang::java::jdt::m3::Core;
+import lang::java::m3::TypeHierarchy;
+import lang::java::m3::TypeSymbol;
 
 import main::DataSet;
 import main::ReachabilityAnalysis;
@@ -453,7 +455,13 @@ public void appendLibrariesResultToOutputFile(M3Result libResults, Result result
     appendToFile(differencesFile, "Libraries private method count;<libResults.privateMethods>;<resultSet.libraries_privateMethods>\r\n");
 }
 
-
+public tuple[loc from, loc to] getPrivatePackegeInvocations(M3 model) 
+{
+    possibleMethodInvocations = model.methodInvocation o model.methodOverrides;
+    
+    
+        
+}
 
 public M3 repairM3(M3 model) 
 {
@@ -475,14 +483,85 @@ public M3 repairM3(M3 model)
 }
 
 
-public M3 repairM3For1129(M3 model) 
+public rel[loc,loc] repairM3For1129(M3 model) 
 {
-    set[loc] undeclaredMethods = range(model.methodInvocation) - domain(model.declarations);
+    set[loc] declaredMethods = { m | m <- domain(model.declarations), isMethod(m) || m.scheme == "java+initializer" };
+    set[loc] declaredClasses = { c | c <- domain(model.declarations), isClass(c) };
+    set[loc] declaredInterfaces = { i | i <- domain(model.declarations), isInterface(i) };
+
+    println("Total method invocations:    <size(model.methodInvocation)>");
+
+    // Correct invocations are invocations for which the target does exist in the 'declarations' relation.
+    rel[loc,loc] correctInvocations = { <source,target> | <source,target> <- model.methodInvocation, target in declaredMethods };
+    println("Total correct invocations:   <size(correctInvocations)>");
     
-    classesAndMethods = { <m, |java+class:///| + m.parent.path, m.file> | m <- undeclaredMethods };
-    
+    // Incorrect invocations are invocations for which the target does not exist in the 'declarations' relation.
+    rel[loc,loc] incorrectInvocations = { <source,target> | <source,target> <- model.methodInvocation, target notin declaredMethods };
+
+    // Incorrect invocations can be divided in two sub sets:
+    rel[loc,loc] externalInvocations = { <source,target> | <source,target> <- incorrectInvocations, 
+        classOf(target) notin declaredClasses && interfaceOf(target) notin declaredInterfaces };
         
+        
+    return externalInvocations;
+        
+    println("Total external invocations:  <size(externalInvocations)>");
+    
+    rel[loc,loc] invocationsToCorrect = incorrectInvocations - externalInvocations;
+    
+    
+    println("Total invocations to corect: <size(invocationsToCorrect)>");
+    
+    modelExtends = getDeclaredTypeHierarchy(model);
+    
+    rel[loc,loc] correctedInvocations = {};
+    
+    rel[loc,loc] newExternalInvocation;
+
+    int i = 0;
+    
+    while(size(invocationsToCorrect) > 0 && i < 10) 
+    {
+
+        rel[loc,loc,loc] potentialCorrectedInvocations = { <from, to, toLocation(to.scheme + "://" + superClassOf(classOf(to), modelExtends).path) + to.file> | <from,to> <- invocationsToCorrect };      
+
+        correctedInvocations += { <source,newTarget> | <source,oldTarget,newTarget> <- potentialCorrectedInvocations, newTarget in declaredMethods };
+        println("Total corrected invocations: <size(correctedInvocations)>");
+
+        externalInvocations += { <source,oldTarget> | <source,oldTarget,newTarget> <- potentialCorrectedInvocations, classOf(newTarget) notin declaredClasses };
+
+        newExternalInvocation = { <source,oldTarget> | <source,oldTarget,newTarget> <- potentialCorrectedInvocations, classOf(newTarget) notin declaredClasses };
+        
+        invocationsToCorrect = { <source,newTarget> | <source,oldTarget,newTarget> <- potentialCorrectedInvocations, newTarget notin declaredMethods && classOf(newTarget) in declaredMethods };
+        println("Incorrect remaining:         <size(invocationsToCorrect)>");
+
+        i = i + 1;
+    }
+    
+    if(i > 9) {
+        println("Gave up after 10 itterations");
+    }
+    
+    //    model.methodInvocation = correctInvocations + externalInvocations + correctedInvocations;
+    
+    //return model;
+    return     newExternalInvocation;  
 }
+
+public loc classOf(loc method) = |java+class:///| + method.parent.path;
+public loc interfaceOf(loc method) = |java+interface:///| + method.parent.path;
+public loc superClassOf(loc class, rel[loc,loc] extends) 
+{
+    set[loc] superClass = extends[class];
+    
+    if(!isEmpty(superClass)) {
+        return getOneFrom(superClass);
+    } else{
+        return class;
+    }
+}
+
+
 
 
 
