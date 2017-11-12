@@ -8,6 +8,7 @@ import lang::java::m3::AST;
 import lang::java::jdt::m3::Core;
 import lang::java::m3::TypeHierarchy;
 import lang::java::m3::TypeSymbol;
+import analysis::graphs::Graph;
 
 import main::DataSet;
 import main::ReachabilityAnalysis;
@@ -15,6 +16,7 @@ import main::cha::ClassHierarchyAnalysis;
 
 import main::results::ResultSet;
 import main::results::LoadResults;
+import main::M3Repair;
 
 // Options
 public bool skipLibraries = true;
@@ -130,6 +132,10 @@ public void analyseJar(Library library, Result resultSet, M3 jdkModel)
 	print("    Loading CPFILE...");
 	cpModel = createM3FromLocation(libraryFolder + library.cpFile);
 	println("Ok");
+	print("    Repairing CPModel...");
+	cpModel = repairM3For1129(cpModel);
+	println("Ok");
+	
 
     print("    Counting code elements in CP Model...");
 	cpResults = countElements(cpModel);
@@ -463,127 +469,6 @@ public tuple[loc from, loc to] getPrivatePackegeInvocations(M3 model)
         
 }
 
-public M3 repairM3(M3 model) 
-{
-    declaredMethod = { <toLocation(replaceAll(m.uri, "$", "/")), m> | m <- methods(model) };
-
-	unDeclaredMethod = { <m, toLocation(replaceAll(m.uri, "$", "/"))> | m <- carrier(model.methodInvocation)  };
-
-    correctionMap = unDeclaredMethod o declaredMethod;
-
-    uncorrectableMethods = carrier(model.methodInvocation) - domain(correctionMap);
-    correctionMap += { <old,old> | old <- uncorrectableMethods };
-
-    // Correct the domain of the methodInvocarion relation.        
-    model.methodInvocation = invert(correctionMap) o  model.methodInvocation;
-    // Correct the range of the methodInvocarion relation.
-    model.methodInvocation = model.methodInvocation o correctionMap;
-  
-    return model;
-}
-
-
-public rel[loc,loc] repairM3For1129(M3 model) 
-{
-    set[loc] declaredMethods = { m | m <- domain(model.declarations), isMethod(m) || m.scheme == "java+initializer" };
-    set[loc] declaredClasses = { c | c <- domain(model.declarations), isClass(c) };
-    set[loc] declaredInterfaces = { i | i <- domain(model.declarations), isInterface(i) };
-
-    println("Total method invocations:    <size(model.methodInvocation)>");
-
-    // Correct invocations are invocations for which the target does exist in the 'declarations' relation.
-    rel[loc,loc] correctInvocations = { <source,target> | <source,target> <- model.methodInvocation, target in declaredMethods };
-    println("Total correct invocations:   <size(correctInvocations)>");
-    
-    // Incorrect invocations are invocations for which the target does not exist in the 'declarations' relation.
-    rel[loc,loc] incorrectInvocations = { <source,target> | <source,target> <- model.methodInvocation, target notin declaredMethods };
-
-    // Incorrect invocations can be divided in two sub sets:
-    rel[loc,loc] externalInvocations = { <source,target> | <source,target> <- incorrectInvocations, 
-        classOf(target) notin declaredClasses && interfaceOf(target) notin declaredInterfaces };
-        
-        
-    return externalInvocations;
-        
-    println("Total external invocations:  <size(externalInvocations)>");
-    
-    rel[loc,loc] invocationsToCorrect = incorrectInvocations - externalInvocations;
-    
-    
-    println("Total invocations to corect: <size(invocationsToCorrect)>");
-    
-    modelExtends = getDeclaredTypeHierarchy(model);
-    
-    rel[loc,loc] correctedInvocations = {};
-    
-    rel[loc,loc] newExternalInvocation;
-
-    int i = 0;
-    
-    while(size(invocationsToCorrect) > 0 && i < 10) 
-    {
-
-        rel[loc,loc,loc] potentialCorrectedInvocations = { <from, to, toLocation(to.scheme + "://" + superClassOf(classOf(to), modelExtends).path) + to.file> | <from,to> <- invocationsToCorrect };      
-
-        correctedInvocations += { <source,newTarget> | <source,oldTarget,newTarget> <- potentialCorrectedInvocations, newTarget in declaredMethods };
-        println("Total corrected invocations: <size(correctedInvocations)>");
-
-        externalInvocations += { <source,oldTarget> | <source,oldTarget,newTarget> <- potentialCorrectedInvocations, classOf(newTarget) notin declaredClasses };
-
-        newExternalInvocation = { <source,oldTarget> | <source,oldTarget,newTarget> <- potentialCorrectedInvocations, classOf(newTarget) notin declaredClasses };
-        
-        invocationsToCorrect = { <source,newTarget> | <source,oldTarget,newTarget> <- potentialCorrectedInvocations, newTarget notin declaredMethods && classOf(newTarget) in declaredMethods };
-        println("Incorrect remaining:         <size(invocationsToCorrect)>");
-
-        i = i + 1;
-    }
-    
-    if(i > 9) {
-        println("Gave up after 10 itterations");
-    }
-    
-    //    model.methodInvocation = correctInvocations + externalInvocations + correctedInvocations;
-    
-    //return model;
-    return     newExternalInvocation;  
-}
-
-public loc classOf(loc method) = |java+class:///| + method.parent.path;
-public loc interfaceOf(loc method) = |java+interface:///| + method.parent.path;
-public loc superClassOf(loc class, rel[loc,loc] extends) 
-{
-    set[loc] superClass = extends[class];
-    
-    if(!isEmpty(superClass)) {
-        return getOneFrom(superClass);
-    } else{
-        return class;
-    }
-}
-
-
-
-
-
-public void validateM3(M3 model) 
-{
-    set[loc]  notDeclared = {};
-    
-    notDeclared = carrier(model.methodInvocation) - domain(model.declarations);
-    println("    Undeclared method invocations: <size(notDeclared)>");
-    
-    notDeclaredStr = { replaceAll(m.uri, "$", "/") | m <- carrier(model.methodInvocation) } - { replaceAll(m.uri, "$", "/" ) | m <- domain(model.declarations) };
-    println("    Undeclared method invocations when ignoring $ sign: <size(notDeclaredStr)>");
-    
-    notDeclared = domain(model.modifiers) - domain(model.declarations);
-    println("    Undeclared element in modifiers: <size(notDeclared)>");
-    
-    notDeclared = carrier(model.extends) - domain(model.declarations);
-    println("    Undeclared extends:            <size(notDeclared)>");
-    
-    notDeclared = carrier(model.implements) - domain(model.declarations);
-    println("    Undeclared implements:         <size(notDeclared)>");
-}
 
 
 public void printM3(M3 model) 

@@ -75,6 +75,16 @@ public rel[loc,loc] getClassInheritance(M3 model)
 }
 */
 
+public rel[loc from, loc to] getDeclaredClassHierarchy(M3 model) 
+{
+     classesWithoutParent = classes(model) - model.extends<from>;
+     
+     classesWithoutParent -= |java+class:///java/lang/Object|;
+     
+     return classesWithoutParent * {|java+class:///java/lang/Object|} + model.extends;
+}
+
+
 public loc classOf(loc method, M3 model) 
 { 
 	if(!isMethod(method)) 
@@ -184,6 +194,8 @@ public set[loc] superTypesOf(set[loc] classes, M3 model)
 	
 	return { y | <x,y> <- classSet+, x in classes };
 }
+
+
 
 
 public set[loc] methodsOf(set[loc] classes, M3 model)
