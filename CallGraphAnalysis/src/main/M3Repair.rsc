@@ -8,6 +8,7 @@ import lang::java::jdt::m3::Core;
 import analysis::graphs::Graph;
 
 import main::Util;
+import main::DateTime;
 
 public M3 repairM3(M3 model) 
 {
@@ -31,43 +32,39 @@ public M3 repairM3(M3 model)
 public rel[loc,loc] ExternalInvocations = {};
 public rel[loc,loc,loc] UncorrectableInvocationsOnClases = {};
 
-
+public rel[loc,loc] UncorrectedInFirstPass = {};
+public rel[loc,loc,loc] CorrectedInSecondPass = {};
 
 public M3 repairM3For1129(M3 model) 
 {
+    startTime = now();
+
     set[loc] declaredMethods = { m | m <- domain(model.declarations), isMethod(m) || m.scheme == "java+initializer" };
     set[loc] declaredClasses = { c | c <- domain(model.declarations), isClass(c) };
     set[loc] declaredInterfaces = { i | i <- domain(model.declarations), isInterface(i) };
 
-    println("Total method invocations:    <size(model.methodInvocation)>");
+    int totalOriginalMethodInvocations = size(model.methodInvocation);
 
     // Correct invocations are invocations for which the target does exist in the 'declarations' relation.
     rel[loc,loc] correctInvocations = { <source,target> | <source,target> <- model.methodInvocation, target in declaredMethods };
-    println("Total correct invocations:   <size(correctInvocations)>");
     
     // Incorrect invocations are invocations for which the target does not exist in the 'declarations' relation.
     rel[loc,loc] incorrectInvocations = { <source,target> | <source,target> <- model.methodInvocation, target notin declaredMethods };
 
     // Incorrect invocations can be divided in two sub sets:
     rel[loc,loc] externalInvocations = { <source,target> | <source,target> <- incorrectInvocations, classOf(target) notin declaredClasses && interfaceOf(target) notin declaredInterfaces };
-    ExternalInvocations = externalInvocations;
-
-    println("Total external invocations:  <size(externalInvocations)>");
     
-    rel[loc from,loc to] invocationsToCorrect = incorrectInvocations - externalInvocations;
-
-    println("Total invocations to correct: <size(invocationsToCorrect)>");
-
     rel[loc,loc] correctedInvocations = {};
+    rel[loc,loc] uncorrectedInvocations = {};
 
-
-    // Select set 
-
-    invocationsToCorrectClass = { <from,to,classOf(to)> | <from,to> <- invocationsToCorrect, classOf(to) in declaredClasses };
-    invocationsToCorrectInterface = { <from,to,interfaceOf(to)> | <from,to> <- invocationsToCorrect, interfaceOf(to) in declaredInterfaces };
+    invocationsToCorrectClass = { <from,to,classOf(to)> | <from,to> <- incorrectInvocations - externalInvocations, classOf(to) in declaredClasses };
+    invocationsToCorrectInterface = { <from,to,interfaceOf(to)> | <from,to> <- incorrectInvocations - externalInvocations, interfaceOf(to) in declaredInterfaces };
     
     declaredClassHierarchy = getDeclaredClassHierarchy(model);
     
+    //
+    // First pass.
+    //
     int j = 0;
 
     // If the declared type was a class, the method must exist on one of its parent classes.
@@ -86,14 +83,17 @@ public M3 repairM3For1129(M3 model)
         j += 1;
     }
     
-    UncorrectableInvocationsOnClases = invocationsToCorrectClass;
-    
+   
+    // Do interfaces
     println("Total interface invocations to correct: <size(invocationsToCorrectInterface)>");
+    
+    declaredInterfaceHierarchy = { <from,to> | <from,to> <- model.implements, isInterface(from) };
+    
     j = 0;
 
     while(size(invocationsToCorrectInterface) > 0 && j < 10) 
     {
-        tempSet = { <from,to,superInterfaceOf(class, model.implements)> | <from,to,class> <- invocationsToCorrectInterface };
+        tempSet = { <from,to,superInterfaceOf(class, declaredInterfaceHierarchy)> | <from,to,class> <- invocationsToCorrectInterface };
 
         newMethods = { <from,to,class,toLocation(to.scheme + "://" + class.path) + to.file> | <from,to,class> <- tempSet };
         
@@ -106,46 +106,31 @@ public M3 repairM3For1129(M3 model)
         j += 1;
     }
 
-    invocationsToCorrect = { <from,to> | <from,to,_> <- invocationsToCorrectClass } + { <from,to> | <from,to,_> <- invocationsToCorrectInterface };
 
-    println("Invocations to correct remaining: <size(invocationsToCorrect)>");
+    println("Invocations to correct remaining: <size(invocationsToCorrectInterface)>");
+
+    //
+    // Second pass.
+    //
 
     declaredTypeHierarchy = getDeclaredTypeHierarchy(model);
     // Remove entries where classes extend from themselves.
     declaredTypeHierarchy -= { <from,to> | <from,to> <- declaredTypeHierarchy, from == to };
     
-    rel[loc,loc] uncorrectedInvocations = {};
-    
-    println("Start correcting <size(invocationsToCorrect)> invocations...");
     int i = 0;
+    
+    rel[loc from,loc to, loc declaredType] invocationsToCorrect = invocationsToCorrectClass + invocationsToCorrectInterface;
+
+    println("Start correcting <size(invocationsToCorrect)> invocations...");
+    
+    list[loc] sortedTypeHierarchy = order(declaredTypeHierarchy);
     
     for(invocation <- invocationsToCorrect) 
     {
-        loc declaredClass = classOf(invocation.to);
-        loc declaredInterface = interfaceOf(invocation.to);
-        
-        loc declaredType;
-        
-        if(declaredClass in declaredClasses)
-        {
-            declaredType = declaredClass;
-        } 
-        elseif(declaredInterface in declaredInterfaces) 
-        {
-            declaredType = declaredInterface;
-        }
-        else
-        {
-            println("Both <declaredClass> and <declaredInterface> do not exists.");
-            uncorrectedInvocations += invocation;
-            continue;
-        }
-        
-        
-        superTypes = superTypesOf(declaredType, declaredTypeHierarchy);
+        superTypes = sortedTypeHierarchy & toList(reach(declaredTypeHierarchy, { invocation.declaredType }));
        
         bool methodFound = false;
-        for(superType <- order(superTypes)) 
+        for(superType <- superTypes) 
         {
             if(!methodFound)
             {
@@ -154,13 +139,17 @@ public M3 repairM3For1129(M3 model)
                 if(method in declaredMethods) 
                 {
                     correctedInvocations += <invocation.from, method>;
+                    
+                    CorrectedInSecondPass += <invocation.from, invocation.to, method>;
+                    
+                    
                     methodFound = true;
                 }
             }
         }
         if(!methodFound) 
         {
-            uncorrectedInvocations += invocation;
+            uncorrectedInvocations += <invocation.from, invocation.to>;
         }
         i += 1;
         if(i mod 250 == 0) {
@@ -170,7 +159,18 @@ public M3 repairM3For1129(M3 model)
         }
     } 
 
-    model.methodInvocation = correctInvocations + externalInvocations + correctedInvocations;
+    model.methodInvocation = correctInvocations + externalInvocations + uncorrectedInvocations + correctedInvocations;
+    
+    
+    println("Total method invocations:              <size(model.methodInvocation)>");
+    println("Total method invocations prior to fix: <totalOriginalMethodInvocations>");
+    println("Total correct method invocations:      <size(correctInvocations)>");
+    println("Total external method invocations:     <size(externalInvocations)>");
+    println("Total corrected method invocations:    <size(correctedInvocations)>");
+    println("Total uncorrected method invocations:  <size(uncorrectedInvocations)>");
+    
+    println("Run time: <formatDuration(now() - startTime)>");
+    
     
     return model;
 }
@@ -202,10 +202,8 @@ public loc superInterfaceOf(loc class, rel[loc,loc] extends)
 
 public rel[loc,loc] superTypesOf(loc currentType, rel[loc,loc] declaredTypeHierarchy) 
 {
-    rel[loc,loc] superTypes = domainR( declaredTypeHierarchy, { currentType } );
-    
-    // { <from, c> | <from, c> <- declaredTypeHierarchy, from == currentType && isClass(c) }
-    //    + { <from, i> | <from,i> <- declaredTypeHierarchy, from == currentType && isInterface(i) };
+    rel[loc,loc] superTypes =  { <from, c> | <from, c> <- declaredTypeHierarchy, from == currentType && isClass(c) }
+        + { <from, i> | <from,i> <- declaredTypeHierarchy, from == currentType && isInterface(i) };
         
     return superTypes + ({} | it + superTypesOf(to, declaredTypeHierarchy) | <from,to> <- superTypes);
 }  

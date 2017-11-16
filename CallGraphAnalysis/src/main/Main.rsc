@@ -11,6 +11,7 @@ import lang::java::m3::TypeSymbol;
 import analysis::graphs::Graph;
 
 import main::DataSet;
+import main::DateTime;
 import main::ReachabilityAnalysis;
 import main::cha::ClassHierarchyAnalysis;
 
@@ -20,10 +21,12 @@ import main::M3Repair;
 
 // Options
 public bool skipLibraries = true;
+public bool countPackagePrivateMethodInvocations = true;
 
 // Environmental settings
 public loc libraryFolder = |file:///C:/CallGraphData/Libraries|;
 public loc jdkFolder = |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64|;
+public loc jdkFolderSmall = |file:///C:/CallGraphData/JavaJDK/small-jdk|;
 public loc resultsFile = |file:///C:/CallGraphData/results.txt|;
 public loc differencesFile = |file:///C:/CallGraphData/differences.csv|;
 public loc packageVisibleFile = |file:///C:/CallGraphData/packageVisible.csv|;
@@ -82,16 +85,21 @@ public void analyseJars(list[int] libraryIdentifiers)
     println("Ok");
 	
     print("Loading Java JDK Libraries...");
-    M3 jdkModel;
-    if(skipLibraries) 
+    M3 jdkModel = emptyM3();
+    if(!skipLibraries) 
     {
-        jdkModel = m3(|project://empty|);
-        println("Skipped");
+        jdkStartTime = now();
+        jdkModel = createM3FromLocation(jdkFolder);
+        println("Ok (Time <formatDuration(now() - jdkStartTime)>)");
+
+        print("Repairing Java JDK Libraries model...");
+        jdkStartTime = now();
+        jdkModel = repairM3For1129(jdkModel);        
+        println("Ok (Time <formatDuration(now() - jdkStartTime)>)");
     } 
     else
     {
-        jdkModel = createM3FromLocation(jdkFolder);
-        println("Ok");
+        println("Skipped");
     }
     println();
 
@@ -132,15 +140,12 @@ public void analyseJar(Library library, Result resultSet, M3 jdkModel)
 	print("    Loading CPFILE...");
 	cpModel = createM3FromLocation(libraryFolder + library.cpFile);
 	println("Ok");
-	print("    Repairing CPModel...");
-	cpModel = repairM3For1129(cpModel);
-	println("Ok");
-	
 
     print("    Counting code elements in CP Model...");
 	cpResults = countElements(cpModel);
 	println("Ok");
 	
+	M3 libModel = emptyM3();
 	M3Result libResults;
 	
     if(!skipLibraries) {
@@ -169,6 +174,18 @@ public void analyseJar(Library library, Result resultSet, M3 jdkModel)
 		printLibrariesComparison(libResults, resultSet);
 		appendLibrariesResultToOutputFile(libResults, resultSet);
 	}
+	
+	if(countPackagePrivateMethodInvocations) 
+	{
+        completeModel = composeM3(|project://complete|, { cpModel, libModel, jdkModel } );
+        print("    Repairing Complete M3 Model...");
+        completeModel = repairM3For1129(completeModel);
+        println("Ok");
+        print("    Counting package-private method invocations...");
+        println("Ok");
+	}
+	
+	
 	
 	println("");
 	println("    Library running time: <formatDuration(now() - startTime)>");
@@ -204,30 +221,6 @@ public list[loc] findJars(loc location)
 	
 	return (jars | it + findJars(file) | file <- files, isDirectory(file) );
 }
-
-public str formatDuration(Duration duration) 
-{
-	str output = "";
-	if(duration.hours < 10) 
-	{
-		output += "0";
-	}
-	output += "<duration.hours>:";
-
-	if(duration.minutes < 10) 
-	{
-		output += "0";
-	}
-	output += "<duration.minutes>:";
-
-	if(duration.seconds < 10) 
-	{
-		output += "0";
-	}
-	output += "<duration.seconds>";
-	return output;
-}
-
 
 public void appendPackageVisibilityToOutputFile(Library library, M3Result results) 
 {
@@ -461,12 +454,28 @@ public void appendLibrariesResultToOutputFile(M3Result libResults, Result result
     appendToFile(differencesFile, "Libraries private method count;<libResults.privateMethods>;<resultSet.libraries_privateMethods>\r\n");
 }
 
-public tuple[loc from, loc to] getPrivatePackegeInvocations(M3 model) 
+public rel[loc from, loc override] getPrivatePackegeInvocations(M3 model) 
 {
-    possibleMethodInvocations = model.methodInvocation o model.methodOverrides;
+    // Determine the set of package-private classes.
+    set[loc] packagePrivateClasses = classes(model) + enums(model) - { c | <c,m> <- model.modifiers, m == \public() || m == \protected() || m == \private() };
     
+    // Create a mapping relation from package to method.
+    rel[loc,loc] outerPackages = model.containment - { <x,y> | <x,y> <- model.containment, isPackage(x) && isPackage(y) };
+    rel[loc package, loc method] methodPackages = { <x,y> | <x,y> <- outerPackages+, isPackage(x) && isMethod(y) };
     
+    // Determine the set of methods that belong to a package-private class.
+    set[loc] packagePrivateMethods = { method | <class,method> <- model.containment, class in packagePrivateClasses && isMethod(method) }; 
         
+    //rel[loc  ] overrides = { model.methodOverrides, in packagePrivateMethods };
+    
+    
+
+
+    possibleMethodInvocations = { <from,override> | <from,override> <- (model.methodInvocation o model.methodOverrides), override in packagePrivateMethods };
+    
+    crossPackageInvocations = { <from,override> | <from,override> <- possibleMethodInvocations, from.path.parent.parent != override.parent.parent.path }; 
+    
+    return possibleMethodInvocations;        
 }
 
 
