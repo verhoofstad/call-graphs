@@ -81,7 +81,16 @@ public rel[loc from, loc to] getDeclaredClassHierarchy(M3 model)
      
      classesWithoutParent -= |java+class:///java/lang/Object|;
      
-     return classesWithoutParent * {|java+class:///java/lang/Object|} + model.extends;
+     return classesWithoutParent * {|java+class:///java/lang/Object|} + { <from,to> | <from,to> <- model.extends, isClass(from) && isClass(to) };
+}
+public rel[loc from, loc to] getDeclaredEnumHierarchy(M3 model) 
+{
+     enumsWithoutParent = enums(model) - model.extends<from>;
+     
+     enumsWithoutParent -= |java+class:///java/lang/Object|;
+     
+     return enumsWithoutParent * {|java+class:///java/lang/Enum|} + { <from,to> | <from,to> <- model.extends, isEnum(from) && isEnum(to) }
+        + <|java+class:///java/lang/Enum|, |java+class:///java/lang/Object|>;
 }
 
 
