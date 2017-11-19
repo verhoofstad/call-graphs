@@ -11,6 +11,35 @@ import analysis::m3::Core;
 import main::M3Extensions;
 
 
+
+public M3 createM3FromLocation(loc location) 
+{
+    if(isDirectory(location)) 
+    {
+         return createM3FromJars(location, findJars(location));
+    }
+    return createM3FromJar(location);
+}
+
+public M3 createM3FromJars(loc modelId, list[loc] jarFiles) 
+{
+    set[M3] models = { createM3FromJar(jar) | jar <- jarFiles };
+    
+    return composeM3(modelId, models);
+}
+
+/**
+* Returns a list of file paths of all jar files that are found in a given directory. 
+*/
+public list[loc] findJars(loc location)
+{
+    list[loc] files = [ location + entry | entry <- listEntries(location) ];
+    list[loc] jars = [ entry | entry <- files, entry.extension == "jar" ];
+    
+    return (jars | it + findJars(file) | file <- files, isDirectory(file) );
+}
+
+
 /**
 * Returns a list of all the call sites in a given method.
 */
@@ -75,22 +104,22 @@ public rel[loc,loc] getClassInheritance(M3 model)
 }
 */
 
-public rel[loc from, loc to] getDeclaredClassHierarchy(M3 model) 
+// Classes and enums have always at most one parent. 
+// It is more efficient to use a map instead of a relation. (Is it?)
+public map[loc from, loc to] getDeclaredClassHierarchy(M3 model) 
 {
      classesWithoutParent = classes(model) - model.extends<from>;
      
-     classesWithoutParent -= |java+class:///java/lang/Object|;
-     
-     return classesWithoutParent * {|java+class:///java/lang/Object|} + { <from,to> | <from,to> <- model.extends, isClass(from) && isClass(to) };
+     return ( from : to | <from,to> <- classesWithoutParent * {|java+class:///java/lang/Object|} + { <from,to> | <from,to> <- model.extends, isClass(from) && isClass(to) } );
 }
-public rel[loc from, loc to] getDeclaredEnumHierarchy(M3 model) 
+
+
+public map[loc from, loc to] getDeclaredEnumHierarchy(M3 model) 
 {
      enumsWithoutParent = enums(model) - model.extends<from>;
      
-     enumsWithoutParent -= |java+class:///java/lang/Object|;
-     
-     return enumsWithoutParent * {|java+class:///java/lang/Enum|} + { <from,to> | <from,to> <- model.extends, isEnum(from) && isEnum(to) }
-        + <|java+class:///java/lang/Enum|, |java+class:///java/lang/Object|>;
+     return ( from : to | <from,to> <- enumsWithoutParent * {|java+class:///java/lang/Enum|} + { <from,to> | <from,to> <- model.extends, isEnum(from) && isEnum(to) }
+        + <|java+class:///java/lang/Enum|, |java+class:///java/lang/Object|> + <|java+class:///java/lang/Object|, |java+class:///java/lang/Object|> );
 }
 
 

@@ -1,4 +1,4 @@
-module main::results::ResultSet
+module main::analysis::count::results::ResultSet
 
 alias Result = tuple[
 	str organisation,

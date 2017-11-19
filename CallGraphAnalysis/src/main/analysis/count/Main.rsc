@@ -1,4 +1,4 @@
-module main::Main
+module main::analysis::count::Main
 
 import Prelude;
 import List;
@@ -10,26 +10,18 @@ import lang::java::m3::TypeHierarchy;
 import lang::java::m3::TypeSymbol;
 import analysis::graphs::Graph;
 
-import main::DataSet;
 import main::DateTime;
-import main::ReachabilityAnalysis;
-import main::cha::ClassHierarchyAnalysis;
-
-import main::results::ResultSet;
-import main::results::LoadResults;
-import main::M3Repair;
+import main::analysis::DataSet;
+import main::analysis::Util;
+import main::analysis::count::results::ResultSet;
+import main::analysis::count::results::LoadResults;
 
 // Options
-public bool skipLibraries = true;
-public bool countPackagePrivateMethodInvocations = true;
+public bool skipLibraries = false;
 
 // Environmental settings
-public loc libraryFolder = |file:///C:/CallGraphData/Libraries|;
-public loc jdkFolder = |file:///C:/CallGraphData/JavaJDK/java-8-openjdk-amd64|;
-public loc jdkFolderSmall = |file:///C:/CallGraphData/JavaJDK/small-jdk|;
 public loc resultsFile = |file:///C:/CallGraphData/results.txt|;
 public loc differencesFile = |file:///C:/CallGraphData/differences.csv|;
-public loc packageVisibleFile = |file:///C:/CallGraphData/packageVisible.csv|;
 
 
 alias M3Result = tuple[
@@ -75,8 +67,24 @@ public void analyseJars()
     analyseJars([0..99]);
 }
 
-
 public void analyseJars(list[int] libraryIdentifiers) 
+{
+    if(!skipLibraries) 
+    {
+        startTime = now();
+        print("Loading Java JDK Libraries...");
+    
+        M3 jdkModel = createM3FromLocation(jdkFolder);
+        println("Ok (Time <formatDuration(now() - startTime)>)");
+    }
+    else
+    {
+        println("Skipped");
+        analyseJars(libraryIdentifiers, emptyM3(|project://emptyJDK|));
+    }
+}
+
+public void analyseJars(list[int] libraryIdentifiers, M3 jdkModel) 
 {
     startTime = now();
 
@@ -84,32 +92,9 @@ public void analyseJars(list[int] libraryIdentifiers)
     results = LoadResults(resultsFile);
     println("Ok");
 	
-    print("Loading Java JDK Libraries...");
-    M3 jdkModel = emptyM3();
-    if(!skipLibraries) 
-    {
-        jdkStartTime = now();
-        jdkModel = createM3FromLocation(jdkFolder);
-        println("Ok (Time <formatDuration(now() - jdkStartTime)>)");
-
-        print("Repairing Java JDK Libraries model...");
-        jdkStartTime = now();
-        jdkModel = repairM3For1129(jdkModel);        
-        println("Ok (Time <formatDuration(now() - jdkStartTime)>)");
-    } 
-    else
-    {
-        println("Skipped");
-    }
-    println();
-
     // Create an output file.
     str header = "description;Rascal Count;Opal Count";
     writeFile(differencesFile, "<header>\r\n");
-
-    // Create an output file for package visibility 
-    header = "organisation;name;revision;public_classes;package_private_classes;percentage;packages;object_method_invocation";
-    writeFile(packageVisibleFile, "<header>\r\n");
 
 	for(library <- TestDataSet, library.id in libraryIdentifiers) 
 	{
@@ -121,6 +106,8 @@ public void analyseJars(list[int] libraryIdentifiers)
 	println("");
 	println("Total running time: <formatDuration(now() - startTime)>");
 }
+
+
 
 public void analyseJar(Library library, Result resultSet, M3 jdkModel) 
 {
@@ -145,7 +132,7 @@ public void analyseJar(Library library, Result resultSet, M3 jdkModel)
 	cpResults = countElements(cpModel);
 	println("Ok");
 	
-	M3 libModel = emptyM3();
+	M3 libModel = emptyM3(|project://emptyLibModel|);
 	M3Result libResults;
 	
     if(!skipLibraries) {
@@ -167,66 +154,15 @@ public void analyseJar(Library library, Result resultSet, M3 jdkModel)
 
 	appendProjectResultsToOutputFile(cpResults, resultSet);
 	
-	appendPackageVisibilityToOutputFile(library, cpResults);
-
     if(!skipLibraries) {
 
 		printLibrariesComparison(libResults, resultSet);
 		appendLibrariesResultToOutputFile(libResults, resultSet);
 	}
 	
-	if(countPackagePrivateMethodInvocations) 
-	{
-        completeModel = composeM3(|project://complete|, { cpModel, libModel, jdkModel } );
-        print("    Repairing Complete M3 Model...");
-        completeModel = repairM3For1129(completeModel);
-        println("Ok");
-        print("    Counting package-private method invocations...");
-        println("Ok");
-	}
-	
-	
-	
 	println("");
 	println("    Library running time: <formatDuration(now() - startTime)>");
     println("------------------------------------------------------------------------");
-}
-
-public M3 createM3FromLocation(loc location) 
-{
-	if(isDirectory(location)) 
-	{
-		 return createM3FromJars(location, findJars(location));
-	}
-	return createM3FromJar(location);
-}
-
-public M3 createM3FromJars(loc modelId, list[loc] jarFiles) 
-{
-	set[M3] models = { createM3FromJar(jar) | jar <- jarFiles };
-	
-	return composeM3(modelId, models);
-}
-
-public M3 loadLib(int libraryId) 
-{
-    return createM3FromJar(libraryFolder + TestDataSet[libraryId].cpFile);
-}
-public list[int] smallJars() = [2..99] - [3] - [25];
-
-public list[loc] findJars(loc location)
-{
-	list[loc] files = [ location + entry | entry <- listEntries(location) ];
-	list[loc] jars = [ entry | entry <- files, entry.extension == "jar" ];
-	
-	return (jars | it + findJars(file) | file <- files, isDirectory(file) );
-}
-
-public void appendPackageVisibilityToOutputFile(Library library, M3Result results) 
-{
-    str packagePrivateClassPercentageStr = replaceAll(toString(results.packagePrivateClassPercentage), ".", ",");
-    
-    appendToFile(packageVisibleFile, "<library.organisation>;<library.name>;<library.revision>;<results.classCount>;<results.packagePrivateClassCount>;<packagePrivateClassPercentageStr>%;<results.packagesWithPackagePrivateClasses>;<results.objectMethodInvocation>\r\n");
 }
 
 
@@ -274,7 +210,6 @@ public M3Result countElements(M3 model)
     set[loc] publicEnums = { enum | enum <- outerEnums, <enum,\public()> in model.modifiers }; 
     set[loc] packagePrivateEnums = outerEnums - publicEnums;
     
-
 
     int packagesWithPackagePrivateClasses = size({ <package> | <package,class> <-  model.containment o model.containment, 
         isPackage(package) && class in packagePrivateClasses });
@@ -454,31 +389,6 @@ public void appendLibrariesResultToOutputFile(M3Result libResults, Result result
     appendToFile(differencesFile, "Libraries private method count;<libResults.privateMethods>;<resultSet.libraries_privateMethods>\r\n");
 }
 
-public rel[loc from, loc override] getPrivatePackegeInvocations(M3 model) 
-{
-    // Determine the set of package-private classes.
-    set[loc] packagePrivateClasses = classes(model) + enums(model) - { c | <c,m> <- model.modifiers, m == \public() || m == \protected() || m == \private() };
-    
-    // Create a mapping relation from package to method.
-    rel[loc,loc] outerPackages = model.containment - { <x,y> | <x,y> <- model.containment, isPackage(x) && isPackage(y) };
-    rel[loc package, loc method] methodPackages = { <x,y> | <x,y> <- outerPackages+, isPackage(x) && isMethod(y) };
-    
-    // Determine the set of methods that belong to a package-private class.
-    set[loc] packagePrivateMethods = { method | <class,method> <- model.containment, class in packagePrivateClasses && isMethod(method) }; 
-        
-    //rel[loc  ] overrides = { model.methodOverrides, in packagePrivateMethods };
-    
-    
-
-
-    possibleMethodInvocations = { <from,override> | <from,override> <- (model.methodInvocation o model.methodOverrides), override in packagePrivateMethods };
-    
-    crossPackageInvocations = { <from,override> | <from,override> <- possibleMethodInvocations, from.path.parent.parent != override.parent.parent.path }; 
-    
-    return possibleMethodInvocations;        
-}
-
-
 
 public void printM3(M3 model) 
 {
@@ -493,28 +403,3 @@ public void printM3(M3 model)
     println("Number of names: <size(model.names)>");
     println("Number of modifiers: <size(model.modifiers)>");
 }
-
-
-public void analyseJDK() 
-{
-    list[loc] jdkFiles = findJars(jdkFolder); 
-
-    for(loc jdkFile <- jdkFiles) 
-    {
-        println("Stats for <jdkFile>:");
-        println();
-
-        M3 model = createM3FromJar(jdkFile);
-
-        int packageCount = size({ d | <d,_> <- model.declarations, d.scheme == "java+package" });
-        int methodCount = size(methods(model));
-        int classFileCount = size({ d | <d,_> <- model.declarations, d.scheme == "java+compilationUnit" });
-        
-        println("Package count:     <packageCount>");
-        println("Method count:      <methodCount>");
-        println("Class file count:  <classFileCount>");
-        println();
-        println();
-    }
-}
-

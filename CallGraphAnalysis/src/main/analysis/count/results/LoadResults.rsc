@@ -1,6 +1,6 @@
-module main::results::LoadResults
+module main::analysis::count::results::LoadResults
 
-import main::results::ResultSet;
+import main::analysis::count::results::ResultSet;
 import Prelude;
 import String;
 import IO;

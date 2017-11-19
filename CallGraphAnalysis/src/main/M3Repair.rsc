@@ -29,58 +29,57 @@ public M3 repairM3(M3 model)
     return model;
 }
 
-public rel[loc,loc] ExternalInvocations = {};
-public rel[loc,loc,loc] UncorrectableInvocationsOnClases = {};
-
-public rel[loc,loc] UncorrectedInFirstPass = {};
-public rel[loc,loc,loc] CorrectedInSecondPass = {};
 public rel[loc,loc] UncorrectedInvocations = {};
+
+
+public M3 repairM3For1145(M3 model) 
+{
+    // Find the incorrect clone invocations
+    rel[loc,loc] cloneInvocations = { <source,target> | <source,target> <- model.methodInvocation, startsWith(target.path, "/[") && contains(target.path, "clone") };
+    
+    model.methodInvocation = model.methodInvocation - cloneInvocations + { <from,|java+method:///java/lang/Object/clone()|> | <from,_> <- cloneInvocations };
+
+    println("Found and corrected <size(cloneInvocations)>");
+
+    return model;
+}
+
 
 public M3 repairM3For1129(M3 model) 
 {
     startTime = now();
-
+    
     set[loc] declaredMethods = methods(model);
     set[loc] declaredClasses = classes(model);
     set[loc] declaredEnums = enums(model);
     set[loc] declaredInterfaces = interfaces(model);
 
-    int totalOriginalMethodInvocations = size(model.methodInvocation);
-
     // Incorrect invocations are invocations for which the target does not exist in the 'declarations' relation.
     rel[loc,loc] incorrectInvocations = { <source,target> | <source,target> <- model.methodInvocation, target notin declaredMethods };
-    println("Found <size(incorrectInvocations)> incorrect method invocations.");
 
-    // 
-    rel[loc,loc] cloneInvocations = { <source,target> | <source,target> <- incorrectInvocations, startsWith(target.path, "/[") && contains(target.path, "clone") }; 
-    incorrectInvocations -= cloneInvocations;
+    int totalOriginalMethodInvocations = size(model.methodInvocation);
+    int totalIncorrectMethodInvocations = size(incorrectInvocations);
 
-    // Incorrect invocations can be divided in two sub sets:
-    rel[loc,loc] externalInvocations = { <source,target> | <source,target> <- incorrectInvocations, classOf(target) notin declaredClasses && interfaceOf(target) notin declaredInterfaces && enumOf(target) notin declaredEnums };
-    
     rel[loc,loc] correctedInvocations = {};
-    rel[loc,loc] uncorrectedInvocations = {};
     
-    // First, correct the invalid clone invocations.
-    correctedInvocations += { <from,|java+method:///java/lang/Object/clone()|> | <from,_> <- cloneInvocations };
-
     invocationsToCorrectClass = { <from,to,classOf(to)> | <from,to> <- incorrectInvocations, classOf(to) in declaredClasses };
     invocationsToCorrectEnum = { <from,to,enumOf(to)> | <from,to> <- incorrectInvocations, enumOf(to) in declaredEnums };
     invocationsToCorrectInterface = { <from,to,interfaceOf(to)> | <from,to> <- incorrectInvocations, interfaceOf(to) in declaredInterfaces };
     
-    declaredClassHierarchy = getDeclaredClassHierarchy(model);
+    uncorrectedInvocations = { <from,to> | <from,to> <- incorrectInvocations, classOf(to) notin declaredClasses && enumOf(to) notin declaredEnums && interfaceOf(to) notin declaredInterfaces };
+    
+    map[loc,loc] declaredClassHierarchy = getDeclaredClassHierarchy(model);
     
     //
     // First pass.
     //
     int j = 0;
-    println("Total class invocations to correct: <size(invocationsToCorrectClass)>");
-
+    
     // If the declared type was a class, the method must exist on one of its parent classes.
     // There is an exception to this involving abstract classes. In that case the compiled abstract class 
     while(size(invocationsToCorrectClass) > 0 && j < 10) 
     {
-        tempSet = { <from,to,superClassOf(class, declaredClassHierarchy)> | <from,to,class> <- invocationsToCorrectClass };
+        tempSet = { <from,to,declaredClassHierarchy[class]> | <from,to,class> <- invocationsToCorrectClass };
 
         newMethods = { <from,to,class,toLocation(to.scheme + "://" + class.path) + to.file> | <from,to,class> <- tempSet };
         
@@ -89,21 +88,19 @@ public M3 repairM3For1129(M3 model)
         correctedInvocations += correctMethods;
         invocationsToCorrectClass = { <from,to,class> | <from,to,class,newTo> <- newMethods, newTo notin declaredMethods };
         
-        println("   <size(correctMethods)> methods corrected; <size(invocationsToCorrectClass)> remaining.");
         j += 1;
     }
     
     // Reset the remaining 
     invocationsToCorrectClass = { <from,to,classOf(to)> | <from,to,_> <- invocationsToCorrectClass };
     
-    println("Total enum invocations to correct: <size(invocationsToCorrectEnum)>");
     declaredEnumHierarchy = getDeclaredEnumHierarchy(model);
     
     // Do enums
     j = 0;
     while(size(invocationsToCorrectEnum) > 0 && j < 10) 
     {
-        tempSet = { <from,to,superClassOf(enum, declaredEnumHierarchy)> | <from,to,enum> <- invocationsToCorrectEnum };
+        tempSet = { <from,to,declaredEnumHierarchy[enum]> | <from,to,enum> <- invocationsToCorrectEnum };
 
         newMethods = { <from,to,enum,toLocation(to.scheme + "://" + enum.path) + to.file> | <from,to,enum> <- tempSet };
         
@@ -112,7 +109,6 @@ public M3 repairM3For1129(M3 model)
         correctedInvocations += correctMethods;
         invocationsToCorrectEnum = { <from,to,enum> | <from,to,enum,newTo> <- newMethods, newTo notin declaredMethods };
         
-        println("   <size(correctMethods)> methods corrected; <size(invocationsToCorrectEnum)> remaining.");
         j += 1;
     }
     // Reset the remaining 
@@ -120,8 +116,6 @@ public M3 repairM3For1129(M3 model)
     
        
     // Do interfaces
-    println("Total interface invocations to correct: <size(invocationsToCorrectInterface)>");
-    
     declaredInterfaceHierarchy = { <from,to> | <from,to> <- model.implements, isInterface(from) };
     
     j = 0;
@@ -137,29 +131,19 @@ public M3 repairM3For1129(M3 model)
         correctedInvocations += correctMethods;
         invocationsToCorrectInterface = { <from,to,class> | <from,to,class,newTo> <- newMethods, newTo notin declaredMethods };
         
-        println("   <size(correctMethods)> methods corrected; <size(invocationsToCorrectInterface)> remaining.");
         j += 1;
     }
     // Reset the remaining 
     invocationsToCorrectInterface = { <from,to,interfaceOf(to)> | <from,to,_> <- invocationsToCorrectInterface };
 
 
-    println("Invocations to correct remaining: <size(invocationsToCorrectInterface)>");
-
     //
     // Second pass.
     //
 
     declaredTypeHierarchy = getDeclaredTypeHierarchy(model);
-    // Remove entries where classes extend from themselves.
-    declaredTypeHierarchy -= { <from,to> | <from,to> <- declaredTypeHierarchy, from == to };
-    
-    int i = 0;
     
     rel[loc from,loc to, loc declaredType] invocationsToCorrect = invocationsToCorrectClass + invocationsToCorrectInterface + invocationsToCorrectEnum;
-
-    println("Start correcting <size(invocationsToCorrect)> remaining incorrect invocations...");
-    
     list[loc] sortedTypeHierarchy = order(declaredTypeHierarchy);
     
     for(invocation <- invocationsToCorrect) 
@@ -176,10 +160,6 @@ public M3 repairM3For1129(M3 model)
                 if(method in declaredMethods) 
                 {
                     correctedInvocations += <invocation.from, method>;
-                    
-                    CorrectedInSecondPass += <invocation.from, invocation.to, method>;
-                    
-                    
                     methodFound = true;
                 }
             }
@@ -188,49 +168,30 @@ public M3 repairM3For1129(M3 model)
         {
             uncorrectedInvocations += <invocation.from, invocation.to>;
         }
-        i += 1;
-        if(i mod 250 == 0) {
-            println("Done <i>");
-            println("So far corrected: <size(correctedInvocations)>");
-            println("So far uncorrected: <size(uncorrectedInvocations)>");
-        }
     } 
     
     // Correct invocations are invocations for which the target does exist in the 'declarations' relation.
     rel[loc,loc] correctInvocations = { <source,target> | <source,target> <- model.methodInvocation, target in declaredMethods };
     
 
-    model.methodInvocation = correctInvocations + externalInvocations + uncorrectedInvocations + correctedInvocations;
-    
+    model.methodInvocation = correctInvocations + uncorrectedInvocations + correctedInvocations;
     
     UncorrectedInvocations = uncorrectedInvocations;
     
-    println("Total method invocations:              <size(model.methodInvocation)>");
-    println("Total method invocations prior to fix: <totalOriginalMethodInvocations>");
-    println("Total correct method invocations:      <size(correctInvocations)>");
-    println("Total external method invocations:     <size(externalInvocations)>");
-    println("Total corrected method invocations:    <size(correctedInvocations)>");
-    println("Total uncorrected method invocations:  <size(uncorrectedInvocations)>");
+    println("   Total method invocations:              <size(model.methodInvocation)>");
+    println("   Total method invocations prior to fix: <totalOriginalMethodInvocations>");
+    println("   Total correct method invocations:      <size(correctInvocations)>");
+    println("   Total corrected method invocations:    <size(correctedInvocations)>");
+    println("   Total uncorrected method invocations:  <size(uncorrectedInvocations)>");
     
-    println("Run time: <formatDuration(now() - startTime)>");
-    
-    
+    println("   Run time: <formatDuration(now() - startTime)>");
+   
     return model;
 }
 
 public loc classOf(loc method) = |java+class:///| + method.parent.path;
 public loc interfaceOf(loc method) = |java+interface:///| + method.parent.path;
 public loc enumOf(loc method) = |java+enum:///| + method.parent.path;
-public loc superClassOf(loc class, rel[loc,loc] declaredClassHierarchy) 
-{
-    set[loc] superClass = declaredClassHierarchy[class];
-    
-    if(!isEmpty(superClass)) {
-        return getOneFrom(superClass);
-    } else{
-        return class;
-    }
-}
 
 public loc superInterfaceOf(loc class, rel[loc,loc] extends) 
 {
@@ -244,27 +205,6 @@ public loc superInterfaceOf(loc class, rel[loc,loc] extends)
 }
 
 
-public rel[loc,loc] superTypesOf(loc currentType, rel[loc,loc] declaredTypeHierarchy) 
-{
-    rel[loc,loc] superTypes =  { <from, c> | <from, c> <- declaredTypeHierarchy, from == currentType && isClass(c) }
-        + { <from, i> | <from,i> <- declaredTypeHierarchy, from == currentType && isInterface(i) };
-        
-    return superTypes + ({} | it + superTypesOf(to, declaredTypeHierarchy) | <from,to> <- superTypes);
-}  
-
-public rel[loc,loc] testSuperClasses(loc declaredType, M3 model) 
-{
-    declaredTypeHierarchy = getDeclaredTypeHierarchy(model);
-    transitiveDeclaredTypeHierarchy = declaredTypeHierarchy+; 
-    
-    //{ transitiveDeclaredTypeHierarchy
-    
-    return { <from,to> | <from,to> <- declaredTypeHierarchy, <declaredType, to> in declaredTypeHierarchy };
-}
-
-
-
-
 public void validateM3(M3 model) 
 {
     set[loc]  notDeclared = {};
@@ -272,8 +212,8 @@ public void validateM3(M3 model)
     notDeclared = carrier(model.methodInvocation) - domain(model.declarations);
     println("    Undeclared method invocations: <size(notDeclared)>");
     
-    notDeclaredStr = { replaceAll(m.uri, "$", "/") | m <- carrier(model.methodInvocation) } - { replaceAll(m.uri, "$", "/" ) | m <- domain(model.declarations) };
-    println("    Undeclared method invocations when ignoring $ sign: <size(notDeclaredStr)>");
+    //notDeclaredStr = { replaceAll(m.uri, "$", "/") | m <- carrier(model.methodInvocation) } - { replaceAll(m.uri, "$", "/" ) | m <- domain(model.declarations) };
+    //println("    Undeclared method invocations when ignoring $ sign: <size(notDeclaredStr)>");
     
     notDeclared = domain(model.modifiers) - domain(model.declarations);
     println("    Undeclared element in modifiers: <size(notDeclared)>");

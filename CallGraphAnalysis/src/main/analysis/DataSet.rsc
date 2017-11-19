@@ -1,8 +1,13 @@
-module main::DataSet
+module main::analysis::DataSet
 
 import Prelude;
+import lang::java::m3::Core;
+import main::Util;
 
 alias Library = tuple[int id, str organisation, str name, str revision, str cpFile, list[str] libFiles];
+
+public list[int libraryId] smallLibraries = [2..99] - [3] - [25];
+
 
 public list[Library] TestDataSet = 
 [
@@ -24,6 +29,7 @@ public list[Library] TestDataSet =
 	<6, "com.google.guava", "guava", "19.0-rc2", "com.google.guava/guava/bundles/guava-19.0-rc2.jar", [
 		"java-8-openjdk-amd64/jre/lib/"]>,
 	<7, "ch.qos.logback", "logback-classic", "1.1.3", "ch.qos.logback/logback-classic/jars/logback-classic-1.1.3.jar", [
+	    "ch.qos.logback/logback-core/jars/logback-core-1.1.3.jar", // Added myself
 		"java-8-openjdk-amd64/jre/lib/"]>,
 	<8, "commons-io", "commons-io", "2.4", "commons-io/commons-io/jars/commons-io-2.4.jar", [
 		"java-8-openjdk-amd64/jre/lib/"]>,

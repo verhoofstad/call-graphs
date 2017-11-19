@@ -6,8 +6,10 @@ import lang::java::m3::AST;
 import lang::java::m3::TypeHierarchy;
 import lang::java::jdt::m3::Core;
 import analysis::graphs::Graph;
-import main::Main;
+import main::Util;
 import main::M3Repair;
+import main::analysis::DataSet;
+import main::analysis::Util;
 
 
 import main::Util;
