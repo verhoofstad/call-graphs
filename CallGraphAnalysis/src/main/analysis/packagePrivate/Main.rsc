@@ -19,6 +19,25 @@ import main::M3Repair;
 // Environmental settings
 public loc packageVisibleFile = |file:///C:/CallGraphData/packageVisible.csv|;
 
+alias AnalysisResult = tuple[
+    loc modelId,
+    // Class count
+    int project_classCount,
+    int project_packagePrivateClassCount,
+    int project_purePackagePrivateClassCount,
+    // 
+    int project_totalMethodInvocationCount,
+    int project_constructorInvocationCount,
+    int project_privateMethodInvocationCount,
+    int project_staticMethodInvocationCount,
+    int project_virtualMethodInvocationCount,
+    // 
+    int project_possibleCallInstances,
+    int project_packagePrivateCallInstances,
+    int project_crossPackage_packagePrivateCallInstances
+];
+
+
 
 public void analyseJars() 
 {
@@ -48,7 +67,7 @@ public void analyseJars(list[int] libraryIdentifiers, M3 jdkModel)
 {
     startTime = now();
 
-    for(library <- TestDataSet, library.id in libraryIdentifiers) 
+    for(library <- CompleteDataSet(), library.id in libraryIdentifiers) 
     {
         analyseJar(library, jdkModel);
     }
@@ -85,7 +104,7 @@ public void analyseJar(Library library, M3 jdkModel)
     completeModel = composeM3(|project://complete|, { cpModel, libModel, jdkModel } );
     println("Ok");
     
-    print("    Repairing Complete M3 Model...");
+    println("    Repairing Complete M3 Model...");
     completeModel = repairM3For1145(completeModel);
     completeModel = repairM3For1129(completeModel);
     println("Ok");
@@ -93,57 +112,82 @@ public void analyseJar(Library library, M3 jdkModel)
 
     println("    Counting package-private method invocations...");
     println();
+    /*
+    AnalysisResult result = getPrivatePackegeInvocations(cpModel, completeModel);
     
-    getPrivatePackegeInvocations(completeModel, cpModel);
-    
-    
+    println("        Project class count:                                    <result.project_classCount>");
+    println("        Project package-private class count:                    <result.project_packagePrivateClassCount>");
+    println("        Project pure package-private class count:               <result.project_purePackagePrivateClassCount>");
+    println("        Project total method invocation count:                  <result.project_totalMethodInvocationCount>");
+//    println("        Project constructor invocation count:                   <result.project_constructorInvocationCount>");
+  //  println("        Project private method invocatiojn count:               <result.project_privateMethodInvocationCount>");
+    println("        Project virtual method invocation count:                <result.project_virtualMethodInvocationCount>");
+    println("        Project possible call instance count:                   <result.project_possibleCallInstances>");
+    println("        Project possible package-private call instance count:   <result.project_packagePrivateCallInstances>");
+    println("        Project possible cross package-private call instances:  <result.project_crossPackage_packagePrivateCallInstances>");
+    */
     println("");
     println("    Library running time: <formatDuration(now() - startTime)>");
     println("------------------------------------------------------------------------");
 }
 
-public void getPrivatePackegeInvocations(M3 model, M3 targetModel) 
+public AnalysisResult getPrivatePackegeInvocations(M3 model, M3 completeModel) 
 {
-    set[loc] overridenMethods = domain(model.methodOverrides);
-    set[loc] privateMethods = { method | <method,modifier> <- model.modifiers, isMethod(method) && modifier == \private() };
+    set[loc] overridenMethods = domain(completeModel.methodOverrides);
+    set[loc] privateMethods = { method | <method,modifier> <- completeModel.modifiers, isMethod(method) && modifier == \private() };
 
+    // Determine the se
+    set[loc] methodInvocationSources = domain(model.methodInvocation);
+    rel[loc from, loc to] methodInvocations = { <from,to> | <from,to> <- completeModel.methodInvocation, from in methodInvocationSources }; 
+
+
+    //int constructorInvocationCount = size( { <from,to> | <from,to> <- methodInvocations, isConstructor(to)} );
+    //int privateMethodInvocationCount = size( { <from,to> | <from,to> <- methodInvocations, !isConstructor(to) && to in privateMethods } );
 
     // First, select invocations of methods that can not be resolved by CHA. These include
     // - Invocations of methods that are overriden by at least one other method. (this implicitly also excludes invocations of static methods)      
     // - Except invocations of constructors.
     // - Except invocations of private methods since these can also be staticly resolved.
-    rel[loc,loc] virtualMethodInvocations = { <from,to> | <from,to> <- targetModel.methodInvocation, 
+    rel[loc,loc] virtualMethodInvocations = { <from,to> | <from,to> <- methodInvocations, 
         to in overridenMethods && !isConstructor(to) && to notin privateMethods };
 
     // Determine the set of package-private classes.
-    set[loc] packagePrivateClasses = classes(model) + enums(model) - { c | <c,m> <- model.modifiers, m == \public() || m == \protected() || m == \private() };
-
+    set[loc] packagePrivateClasses = { class | class <- classes(completeModel) + enums(completeModel), 
+        <class,\public()> notin completeModel.modifiers && <class,\protected()> notin completeModel.modifiers && <class,\private()> notin completeModel.modifiers };
+    
+    // Determine the set of pure package-private classes. These are classes that are not subclassed by any public class.
+    set[loc] publicExtends = { to | <from,to> <- completeModel.extends+, <from,\public()> in completeModel.modifiers && to in packagePrivateClasses };
+    purePackagePrivateClasses = packagePrivateClasses - publicExtends;
+    
     // Determine the set of methods that belong to a package-private class.
-    set[loc] packagePrivateMethods = { method | <class,method> <- model.containment, class in packagePrivateClasses && isMethod(method) }; 
+    set[loc] packagePrivateMethods = { method | <class,method> <- completeModel.containment, class in purePackagePrivateClasses && isMethod(method) }; 
 
     // Create a mapping relation from method to package.
-    rel[loc,loc] outerPackages = model.containment - { <x,y> | <x,y> <- model.containment, isPackage(x) && isPackage(y) };
+    rel[loc,loc] outerPackages = completeModel.containment - { <x,y> | <x,y> <- completeModel.containment, isPackage(x) && isPackage(y) };
     map[loc method, loc package] methodPackages = ( y : x | <x,y> <- outerPackages+, isPackage(x) && isMethod(y) );
     
     
-    rel[loc from, loc to] transitiveOverrides = model.methodOverrides+;
+    rel[loc from, loc to] transitiveOverrides = completeModel.methodOverrides+;
     possibleMethodInvocations = { <from,override> | <from,override> <- (virtualMethodInvocations o transitiveOverrides), override in packagePrivateMethods };
-
     
     possiblePackagePrivateMethodInvocations = { <from,override> | <from,override> <- possibleMethodInvocations, override in packagePrivateMethods }; 
     
     crossPackageInvocations = { <from,override> | <from,override> <- possiblePackagePrivateMethodInvocations, methodPackages[from] != methodPackages[override] }; 
     
-    
-    int virtualMethodInvocationCount = size(virtualMethodInvocations);
-    int possibleMethodInvocationCount = size(possibleMethodInvocations);
-    int possiblePackagePrivateMethodInvocationCount = size(possiblePackagePrivateMethodInvocations);
-    int crossPackageInvocationsCount = size(crossPackageInvocations);
-    
-    println("   Total virtual method invocations:                   <virtualMethodInvocationCount>");
-    println("   Total possible method invocations:                  <possibleMethodInvocationCount>");
-    println("   Total possible package-private method invocations:  <possiblePackagePrivateMethodInvocationCount>");
-    println("   Total cross package method invocations:             <crossPackageInvocationsCount>");
+    return <
+        model.id, //loc modelId,
+        size(classes(model) + enums(model)), //int project_classCount,
+        size(packagePrivateClasses), //int project_packagePrivateClassCount,
+        size(purePackagePrivateClasses), //int project_purePackagePrivateClassCount,
+        size(model.methodInvocation),  //int project_totalMethodInvocationCount
+        -1, //int project_constructorInvocationCount,
+        -1, //int project_privateMethodInvocationCount,
+        -1, //int project_staticMethodInvocationCount,
+        size(virtualMethodInvocations), //int project_virtualMethodInvocationCount,
+        size(possibleMethodInvocations), ///nt project_possibleCallInstances,
+        size(possiblePackagePrivateMethodInvocations), //int project_packagePrivateCallInstances,
+        size(crossPackageInvocations) //int project_crossPackage_packagePrivateCallInstances
+    >;
 }
 
 

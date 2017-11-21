@@ -9,6 +9,8 @@ import analysis::graphs::Graph;
 
 import main::Util;
 import main::DateTime;
+import main::analysis::DataSet;
+import main::analysis::Util;
 
 public M3 repairM3(M3 model) 
 {
@@ -39,7 +41,7 @@ public M3 repairM3For1145(M3 model)
     
     model.methodInvocation = model.methodInvocation - cloneInvocations + { <from,|java+method:///java/lang/Object/clone()|> | <from,_> <- cloneInvocations };
 
-    println("Found and corrected <size(cloneInvocations)>");
+    println("        Found and corrected <size(cloneInvocations)>");
 
     return model;
 }
@@ -48,6 +50,8 @@ public M3 repairM3For1145(M3 model)
 public M3 repairM3For1129(M3 model) 
 {
     startTime = now();
+
+    println("        Total method invocations:              <size(model.methodInvocation)>");
     
     set[loc] declaredMethods = methods(model);
     set[loc] declaredClasses = classes(model);
@@ -57,14 +61,12 @@ public M3 repairM3For1129(M3 model)
     // Incorrect invocations are invocations for which the target does not exist in the 'declarations' relation.
     rel[loc,loc] incorrectInvocations = { <source,target> | <source,target> <- model.methodInvocation, target notin declaredMethods };
 
-    int totalOriginalMethodInvocations = size(model.methodInvocation);
-    int totalIncorrectMethodInvocations = size(incorrectInvocations);
+    println("        Total incorrect method invocations:    <size(incorrectInvocations)>");
+
 
     rel[loc,loc] correctedInvocations = {};
     
     invocationsToCorrectClass = { <from,to,classOf(to)> | <from,to> <- incorrectInvocations, classOf(to) in declaredClasses };
-    invocationsToCorrectEnum = { <from,to,enumOf(to)> | <from,to> <- incorrectInvocations, enumOf(to) in declaredEnums };
-    invocationsToCorrectInterface = { <from,to,interfaceOf(to)> | <from,to> <- incorrectInvocations, interfaceOf(to) in declaredInterfaces };
     
     uncorrectedInvocations = { <from,to> | <from,to> <- incorrectInvocations, classOf(to) notin declaredClasses && enumOf(to) notin declaredEnums && interfaceOf(to) notin declaredInterfaces };
     
@@ -79,9 +81,10 @@ public M3 repairM3For1129(M3 model)
     // There is an exception to this involving abstract classes. In that case the compiled abstract class 
     while(size(invocationsToCorrectClass) > 0 && j < 10) 
     {
-        tempSet = { <from,to,declaredClassHierarchy[class]> | <from,to,class> <- invocationsToCorrectClass };
+        //tempSet = { <from,to,declaredClassHierarchy[class]> | <from,to,class> <- invocationsToCorrectClass };
+        //newMethods = { <from,to,class,toLocation(to.scheme + "://" + class.path) + to.file> | <from,to,class> <- tempSet };
 
-        newMethods = { <from,to,class,toLocation(to.scheme + "://" + class.path) + to.file> | <from,to,class> <- tempSet };
+        newMethods = { <from,to,declaredClassHierarchy[class],toLocation(to.scheme + "://" + declaredClassHierarchy[class].path) + to.file> | <from,to,class> <- invocationsToCorrectClass };
         
         correctMethods = { <from,newTo> | <from,_,_,newTo> <- newMethods, newTo in declaredMethods };
         
@@ -94,15 +97,20 @@ public M3 repairM3For1129(M3 model)
     // Reset the remaining 
     invocationsToCorrectClass = { <from,to,classOf(to)> | <from,to,_> <- invocationsToCorrectClass };
     
-    declaredEnumHierarchy = getDeclaredEnumHierarchy(model);
     
     // Do enums
+    declaredEnumHierarchy = getDeclaredEnumHierarchy(model);
+
+    invocationsToCorrectEnum = { <from,to,enumOf(to)> | <from,to> <- incorrectInvocations, enumOf(to) in declaredEnums };
+
+
     j = 0;
     while(size(invocationsToCorrectEnum) > 0 && j < 10) 
     {
-        tempSet = { <from,to,declaredEnumHierarchy[enum]> | <from,to,enum> <- invocationsToCorrectEnum };
+        //tempSet = { <from,to,declaredEnumHierarchy[enum]> | <from,to,enum> <- invocationsToCorrectEnum };
+        //newMethods = { <from,to,enum,toLocation(to.scheme + "://" + enum.path) + to.file> | <from,to,enum> <- tempSet };
 
-        newMethods = { <from,to,enum,toLocation(to.scheme + "://" + enum.path) + to.file> | <from,to,enum> <- tempSet };
+        newMethods = { <from,to,declaredEnumHierarchy[enum],toLocation(to.scheme + "://" + declaredEnumHierarchy[enum].path) + to.file> | <from,to,enum> <- invocationsToCorrectEnum };
         
         correctMethods = { <from,newTo> | <from,_,_,newTo> <- newMethods, newTo in declaredMethods };
         
@@ -117,15 +125,15 @@ public M3 repairM3For1129(M3 model)
        
     // Do interfaces
     declaredInterfaceHierarchy = { <from,to> | <from,to> <- model.implements, isInterface(from) };
+    invocationsToCorrectInterface = { <from,to,interfaceOf(to)> | <from,to> <- incorrectInvocations, interfaceOf(to) in declaredInterfaces };
     
     j = 0;
 
     while(size(invocationsToCorrectInterface) > 0 && j < 10) 
     {
         tempSet = { <from,to,superInterfaceOf(class, declaredInterfaceHierarchy)> | <from,to,class> <- invocationsToCorrectInterface };
-
         newMethods = { <from,to,class,toLocation(to.scheme + "://" + class.path) + to.file> | <from,to,class> <- tempSet };
-        
+
         correctMethods = { <from,newTo> | <from,_,_,newTo> <- newMethods, newTo in declaredMethods };
         
         correctedInvocations += correctMethods;
@@ -136,14 +144,21 @@ public M3 repairM3For1129(M3 model)
     // Reset the remaining 
     invocationsToCorrectInterface = { <from,to,interfaceOf(to)> | <from,to,_> <- invocationsToCorrectInterface };
 
+    println("        First pass completed. <size(invocationsToCorrectClass)> incorrect class invocations remaining.");
+    println("        First pass completed. <size(invocationsToCorrectEnum)> incorrect enum invocations remaining.");
+    println("        First pass completed. <size(invocationsToCorrectInterface)> incorrect interface invocations remaining.");
+
 
     //
     // Second pass.
     //
 
+
     declaredTypeHierarchy = getDeclaredTypeHierarchy(model);
     
     rel[loc from,loc to, loc declaredType] invocationsToCorrect = invocationsToCorrectClass + invocationsToCorrectInterface + invocationsToCorrectEnum;
+    
+    
     list[loc] sortedTypeHierarchy = order(declaredTypeHierarchy);
     
     for(invocation <- invocationsToCorrect) 
@@ -178,13 +193,11 @@ public M3 repairM3For1129(M3 model)
     
     UncorrectedInvocations = uncorrectedInvocations;
     
-    println("   Total method invocations:              <size(model.methodInvocation)>");
-    println("   Total method invocations prior to fix: <totalOriginalMethodInvocations>");
-    println("   Total correct method invocations:      <size(correctInvocations)>");
-    println("   Total corrected method invocations:    <size(correctedInvocations)>");
-    println("   Total uncorrected method invocations:  <size(uncorrectedInvocations)>");
+    println("        Total correct method invocations:      <size(correctInvocations)>");
+    println("        Total corrected method invocations:    <size(correctedInvocations)>");
+    println("        Total uncorrected method invocations:  <size(uncorrectedInvocations)>");
     
-    println("   Run time: <formatDuration(now() - startTime)>");
+    println("        Run time: <formatDuration(now() - startTime)>");
    
     return model;
 }
@@ -224,3 +237,29 @@ public void validateM3(M3 model)
     notDeclared = carrier(model.implements) - domain(model.declarations);
     println("    Undeclared implements:         <size(notDeclared)>");
 }
+
+
+public void validateM3(list[int] libraryIdentifiers, M3 jdkModel) 
+{
+
+    for(library <- TestDataSet, library.id in libraryIdentifiers) 
+    {
+        list[loc] jarFiles = [ libraryFolder + library.cpFile ] + [ libraryFolder + libFile | libFile <- library.libFiles, libFile != "java-8-openjdk-amd64/jre/lib/" ]; 
+            
+        M3 model = composeM3(|project://complete|, { createM3FromJars(libraryFolder + library.cpFile, jarFiles), jdkModel } );
+    
+        notDeclared = carrier(model.extends) - domain(model.declarations);
+        
+        typeHierarhy = getDeclaredTypeHierarchy(model);
+        notInTypeHierarchy =  classes(model) + interfaces(model) - domain(typeHierarhy);
+        
+        classHierarchy = getDeclaredClassHierarchy(model);
+        notInClassHierarchy =  classes(model) - domain(classHierarchy);
+        
+        println("    <right("<library.id>", 2, " ")> <left(library.cpFile, 70, " ")>:  <right("<size(notDeclared)>", 3, " ")>    <right("<size(notInTypeHierarchy)>", 5, " ")>    <right("<size(notInClassHierarchy)>", 5, " ")>");
+  
+    }
+}
+
+
+

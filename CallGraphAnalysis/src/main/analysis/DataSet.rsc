@@ -9,6 +9,26 @@ alias Library = tuple[int id, str organisation, str name, str revision, str cpFi
 public list[int libraryId] smallLibraries = [2..99] - [3] - [25];
 
 
+public list[Library] CompleteDataSet() 
+{
+    list[Library] completeDataSet = [];
+
+    for(library <- TestDataSet)
+    {
+        if(library.id == 0) 
+        {
+            library.libFiles += ["org.scala-lang/jline/jars/jline-2.10.4.jar", "org.apache.ant/ant/jars/ant-1.9.6.jar" ];
+        }
+        if(library.id == 7) 
+        {
+            library.libFiles += ["ch.qos.logback/logback-core/jars/logback-core-1.1.3.jar"];
+        }
+        completeDataSet += library;
+    } 
+    
+    return completeDataSet; 
+}
+
 public list[Library] TestDataSet = 
 [
 	<0, "org.scala-lang", "scala-compiler", "2.10.4", "org.scala-lang/scala-compiler/jars/scala-compiler-2.10.4.jar", [
@@ -29,7 +49,6 @@ public list[Library] TestDataSet =
 	<6, "com.google.guava", "guava", "19.0-rc2", "com.google.guava/guava/bundles/guava-19.0-rc2.jar", [
 		"java-8-openjdk-amd64/jre/lib/"]>,
 	<7, "ch.qos.logback", "logback-classic", "1.1.3", "ch.qos.logback/logback-classic/jars/logback-classic-1.1.3.jar", [
-	    "ch.qos.logback/logback-core/jars/logback-core-1.1.3.jar", // Added myself
 		"java-8-openjdk-amd64/jre/lib/"]>,
 	<8, "commons-io", "commons-io", "2.4", "commons-io/commons-io/jars/commons-io-2.4.jar", [
 		"java-8-openjdk-amd64/jre/lib/"]>,

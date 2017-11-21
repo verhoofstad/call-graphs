@@ -18,14 +18,19 @@ public M3 loadLib(int libraryId)
 
 public M3 loadLib(int libraryId, bool incLibraries) 
 {
-    loc projectJar = libraryFolder + TestDataSet[libraryId].cpFile;
+    return loadLib(libraryId, incLibraries, emptyM3()); 
+}
+
+public M3 loadLib(int libraryId, bool incLibraries, M3 jdkModel) 
+{
+    loc projectJar = libraryFolder + CompleteDataSet()[libraryId].cpFile;
     M3 model = createM3FromJar(projectJar);
 
     if(incLibraries) 
     {
-        set[M3] libModels = { createM3FromJar(libraryFolder + libFile) | libFile <- TestDataSet[libraryId].libFiles };
+        set[M3] libModels = { createM3FromJar(libraryFolder + libFile) | libFile <- CompleteDataSet()[libraryId].libFiles, libFile != "java-8-openjdk-amd64/jre/lib/" };
     
-        return composeM3(projectJar, { model } + libModels );        
+        return composeM3(projectJar, { model } + libModels + { jdkModel } );        
     }
     return model; 
 }
