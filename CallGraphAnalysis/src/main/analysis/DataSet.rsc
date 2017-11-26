@@ -8,6 +8,9 @@ alias Library = tuple[int id, str organisation, str name, str revision, str cpFi
 
 public list[int libraryId] smallLibraries = [2..99] - [3] - [25];
 
+public list[int libraryId] correctLibraries = [1,2,3,4,5,6,7,8,9,11,12,17,18,19,21,26,27,30,31,33,34,35,37,41,42,43,45,47,48,49,50,
+    51,52,53,55,56,60,63,65,67,68,69,70,71,72,74,76,81,84,86,88,89,90,91,92,94,95,97];
+
 
 public list[Library] CompleteDataSet() 
 {
@@ -19,9 +22,19 @@ public list[Library] CompleteDataSet()
         {
             library.libFiles += ["org.scala-lang/jline/jars/jline-2.10.4.jar", "org.apache.ant/ant/jars/ant-1.9.6.jar" ];
         }
+        if(library.id == 4) 
+        {
+            library.libFiles += ["org.slf4j/slf4j-log4j12/jars/slf4j-log4j12-1.7.12.jar", 
+            "log4j/log4j/bundles/log4j-1.2.17.jar", "javax.mail/mail/jars/mail-1.4.7.jar", "geronimo-jms_1.1_spec-1.1.1.jar" ];
+        }
+        if(library.id == 5) 
+        {
+            library.libFiles += ["javax.mail/mail/jars/mail-1.4.7.jar", "geronimo-jms_1.1_spec-1.1.1.jar"];
+        }
         if(library.id == 7) 
         {
-            library.libFiles += ["ch.qos.logback/logback-core/jars/logback-core-1.1.3.jar"];
+            library.libFiles += ["ch.qos.logback/logback-core/jars/logback-core-1.1.3.jar"]; //, "org.codehaus.groovy/groovy-all/jars/groovy-all-2.4.5.jar"
+                //, "org.apache.ant/ant/jars/ant-1.9.6.jar"];
         }
         completeDataSet += library;
     } 

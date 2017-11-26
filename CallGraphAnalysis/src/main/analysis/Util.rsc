@@ -5,6 +5,7 @@ import lang::java::m3::Core;
 import main::DateTime;
 import main::Util;
 import main::analysis::DataSet;
+import analysis::m3::Core;
 
 // Environmental settings
 public loc libraryFolder = |file:///C:/CallGraphData/Libraries|;
@@ -18,7 +19,7 @@ public M3 loadLib(int libraryId)
 
 public M3 loadLib(int libraryId, bool incLibraries) 
 {
-    return loadLib(libraryId, incLibraries, emptyM3()); 
+    return loadLib(libraryId, incLibraries, emptyM3(|project://empty|)); 
 }
 
 public M3 loadLib(int libraryId, bool incLibraries, M3 jdkModel) 
@@ -33,6 +34,27 @@ public M3 loadLib(int libraryId, bool incLibraries, M3 jdkModel)
         return composeM3(projectJar, { model } + libModels + { jdkModel } );        
     }
     return model; 
+}
+
+public void validateLib(list[Library] libraries) 
+{
+    for(library <- libraries) 
+    {
+        validateLib(library);
+    }
+}
+
+public void validateLib(Library library) 
+{
+    for(libFile <- library.libFiles + [library.cpFile]) 
+    {
+        loc jarFile = libraryFolder + libFile;
+    
+        if(!exists(jarFile)) 
+        {
+            println("Error in lib <library.id>: File <jarFile> does not exists.");            
+        }
+    }
 }
 
 public M3 loadJDK() 

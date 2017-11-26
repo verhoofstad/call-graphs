@@ -12,6 +12,7 @@ import main::DateTime;
 import main::analysis::DataSet;
 import main::analysis::Util;
 
+/*
 public M3 repairM3(M3 model) 
 {
     declaredMethod = { <toLocation(replaceAll(m.uri, "$", "/")), m> | m <- methods(model) };
@@ -30,8 +31,14 @@ public M3 repairM3(M3 model)
   
     return model;
 }
+*/
 
 public rel[loc,loc] UncorrectedInvocations = {};
+
+public M3 repairM3(M3 model) 
+{
+    return repairM3For1129(repairM3For1145(model));
+}
 
 
 public M3 repairM3For1145(M3 model) 
@@ -47,6 +54,31 @@ public M3 repairM3For1145(M3 model)
 }
 
 
+public rel[loc,loc] IncorrectInvocations = {};
+public rel[loc,loc] UnknownDeclaredType = {};
+
+public M3 loadAndRepairLib(int libraryId, M3 jdkModel) 
+{
+    print("Loading library...");
+    M3 model = loadLib(libraryId, true, jdkModel);
+    println("Ok");
+
+    set[loc] declaredMethods = methods(model);
+    set[loc] declaredClasses = classes(model);
+    set[loc] declaredEnums = enums(model);
+    set[loc] declaredInterfaces = interfaces(model);
+    
+    rel[loc,loc] correctInvocations = { <source,target> | <source,target> <- model.methodInvocation, target in declaredMethods };
+    
+    // Incorrect invocations are invocations for which the target does not exist in the 'declarations' relation.
+    IncorrectInvocations = model.methodInvocation - correctInvocations;
+    
+    UnknownDeclaredType = { <from,to> | <from,to> <- IncorrectInvocations, classOf(to) notin declaredClasses && enumOf(to) notin declaredEnums && interfaceOf(to) notin declaredInterfaces };
+    
+    return model;
+}
+
+
 public M3 repairM3For1129(M3 model) 
 {
     startTime = now();
@@ -58,23 +90,30 @@ public M3 repairM3For1129(M3 model)
     set[loc] declaredEnums = enums(model);
     set[loc] declaredInterfaces = interfaces(model);
 
-    // Incorrect invocations are invocations for which the target does not exist in the 'declarations' relation.
-    rel[loc,loc] incorrectInvocations = { <source,target> | <source,target> <- model.methodInvocation, target notin declaredMethods };
+    // Correct invocations are invocations for which the target does exist in the 'declarations' relation.
+    rel[loc,loc] correctInvocations = { <source,target> | <source,target> <- model.methodInvocation, target in declaredMethods };
 
+    // Incorrect invocations are invocations for which the target does not exist in the 'declarations' relation.
+    rel[loc,loc] incorrectInvocations = model.methodInvocation - correctInvocations;
+    
+    println("        Total correct method invocations:      <size(correctInvocations)>");
     println("        Total incorrect method invocations:    <size(incorrectInvocations)>");
 
+    rel[loc,loc,loc] invocationsToCorrectClass = { <from,to,classOf(to)> | <from,to> <- incorrectInvocations, classOf(to) in declaredClasses };
+    println("          - declared type is class:            <size(invocationsToCorrectClass)>");
+    rel[loc,loc,loc] invocationsToCorrectEnum = { <from,to,enumOf(to)> | <from,to> <- incorrectInvocations, enumOf(to) in declaredEnums };
+    println("          - declared type is enum:             <size(invocationsToCorrectEnum)>");
+    rel[loc,loc,loc] invocationsToCorrectInterface = { <from,to,interfaceOf(to)> | <from,to> <- incorrectInvocations, interfaceOf(to) in declaredInterfaces };
+    println("          - declared type is interface:        <size(invocationsToCorrectInterface)>");
+    rel[loc,loc] uncorrectedInvocations = { <from,to> | <from,to> <- incorrectInvocations, classOf(to) notin declaredClasses && enumOf(to) notin declaredEnums && interfaceOf(to) notin declaredInterfaces };
+    println("          - declared type is unknown:          <size(uncorrectedInvocations)>");
 
     rel[loc,loc] correctedInvocations = {};
-    
-    invocationsToCorrectClass = { <from,to,classOf(to)> | <from,to> <- incorrectInvocations, classOf(to) in declaredClasses };
-    
-    uncorrectedInvocations = { <from,to> | <from,to> <- incorrectInvocations, classOf(to) notin declaredClasses && enumOf(to) notin declaredEnums && interfaceOf(to) notin declaredInterfaces };
-    
-    map[loc,loc] declaredClassHierarchy = getDeclaredClassHierarchy(model);
     
     //
     // First pass.
     //
+    map[loc,loc] declaredClassHierarchy = getDeclaredClassHierarchy(model);
     int j = 0;
     
     // If the declared type was a class, the method must exist on one of its parent classes.
@@ -96,13 +135,11 @@ public M3 repairM3For1129(M3 model)
     
     // Reset the remaining 
     invocationsToCorrectClass = { <from,to,classOf(to)> | <from,to,_> <- invocationsToCorrectClass };
+    println("        Incorrect class invocations remaining after 1st pass:     <size(invocationsToCorrectClass)>");
     
     
     // Do enums
     declaredEnumHierarchy = getDeclaredEnumHierarchy(model);
-
-    invocationsToCorrectEnum = { <from,to,enumOf(to)> | <from,to> <- incorrectInvocations, enumOf(to) in declaredEnums };
-
 
     j = 0;
     while(size(invocationsToCorrectEnum) > 0 && j < 10) 
@@ -121,11 +158,11 @@ public M3 repairM3For1129(M3 model)
     }
     // Reset the remaining 
     invocationsToCorrectEnum = { <from,to,enumOf(to)> | <from,to,_> <- invocationsToCorrectEnum };
+    println("        Incorrect enum invocations remaining after 1st pass:      <size(invocationsToCorrectEnum)>");
     
        
     // Do interfaces
     declaredInterfaceHierarchy = { <from,to> | <from,to> <- model.implements, isInterface(from) };
-    invocationsToCorrectInterface = { <from,to,interfaceOf(to)> | <from,to> <- incorrectInvocations, interfaceOf(to) in declaredInterfaces };
     
     j = 0;
 
@@ -143,16 +180,12 @@ public M3 repairM3For1129(M3 model)
     }
     // Reset the remaining 
     invocationsToCorrectInterface = { <from,to,interfaceOf(to)> | <from,to,_> <- invocationsToCorrectInterface };
-
-    println("        First pass completed. <size(invocationsToCorrectClass)> incorrect class invocations remaining.");
-    println("        First pass completed. <size(invocationsToCorrectEnum)> incorrect enum invocations remaining.");
-    println("        First pass completed. <size(invocationsToCorrectInterface)> incorrect interface invocations remaining.");
+    println("        Incorrect interface invocations remaining after 1st pass: <size(invocationsToCorrectInterface)>");
 
 
     //
     // Second pass.
     //
-
 
     declaredTypeHierarchy = getDeclaredTypeHierarchy(model);
     
@@ -185,15 +218,12 @@ public M3 repairM3For1129(M3 model)
         }
     } 
     
-    // Correct invocations are invocations for which the target does exist in the 'declarations' relation.
-    rel[loc,loc] correctInvocations = { <source,target> | <source,target> <- model.methodInvocation, target in declaredMethods };
     
 
     model.methodInvocation = correctInvocations + uncorrectedInvocations + correctedInvocations;
     
     UncorrectedInvocations = uncorrectedInvocations;
     
-    println("        Total correct method invocations:      <size(correctInvocations)>");
     println("        Total corrected method invocations:    <size(correctedInvocations)>");
     println("        Total uncorrected method invocations:  <size(uncorrectedInvocations)>");
     
