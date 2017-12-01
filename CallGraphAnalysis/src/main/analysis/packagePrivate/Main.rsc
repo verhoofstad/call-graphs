@@ -205,13 +205,16 @@ public AnalysisResult getPrivatePackegeInvocations(M3 model, M3 completeModel)
     // Determine the set of pure package-private classes. These are package-private classes that are not subclassed by any public class.
     set[loc] totalPurePackagePrivateClasses = totalPackagePrivateClasses - { super | <sub,super> <- completeModel.extends+, <sub,\public()> in completeModel.modifiers && super in totalPackagePrivateClasses };
     set[loc] projectPurePackagePrivateClasses = projectPackagePrivateClasses - { super | <sub,super> <- model.extends+, <sub,\public()> in model.modifiers && super in projectPackagePrivateClasses };
+
+    // Determine the set of pure package-private classes.
+    set[loc] totalLivePackagePrivateClasses = { classOf(to) | <from,to> <- completeModel.methodInvocation, isConstructor(to) && classOf(to) in totalPurePackagePrivateClasses };
+    set[loc] projectLivePackagePrivateClasses = { classOf(to) | <from,to> <- completeModel.methodInvocation, isConstructor(to) && classOf(to) in projectPurePackagePrivateClasses };
     
-    // Determine the set of methods that belong to a pure package-private class.
-    set[loc] projectPackagePrivateMethods = { method | <class,method> <- model.containment, class in projectPurePackagePrivateClasses && isMethod(method) };
-    set[loc] packagePrivateMethods = { method | <class,method> <- completeModel.containment, class in totalPurePackagePrivateClasses && isMethod(method) };
+    // Determine the set of methods that belong to a live pure package-private class.
+    set[loc] projectPackagePrivateMethods = { method | <class,method> <- model.containment, class in totalLivePackagePrivateClasses && isMethod(method) };
+    set[loc] totalPackagePrivateMethods = { method | <class,method> <- completeModel.containment, class in totalLivePackagePrivateClasses && isMethod(method) };
     
     
-    set[loc] instantiatedPackagePrivateClasses = { classOf(to) | <from,to> <- completeModel.methodInvocation, isConstructor(to) && classOf(to) in totalPurePackagePrivateClasses };
 
     // Create a mapping relation from method to package.
     rel[loc,loc] outerPackages = completeModel.containment - { <x,y> | <x,y> <- completeModel.containment, isPackage(x) && isPackage(y) };
@@ -222,7 +225,7 @@ public AnalysisResult getPrivatePackegeInvocations(M3 model, M3 completeModel)
     possibleMethodInvocations = { <from,override> | <from,override> <- (virtualMethodInvocations o transitiveOverrides) };
     
     // Filter the set for invocations of methods belonging to package-private classes.
-    possiblePackagePrivateMethodInvocations = { <from,override> | <from,override> <- possibleMethodInvocations, override in packagePrivateMethods }; 
+    possiblePackagePrivateMethodInvocations = { <from,override> | <from,override> <- possibleMethodInvocations, override in totalPackagePrivateMethods }; 
     
     // Finally, we filter the set for invocations for which the source method resides in a different package than the method which it invokes.
     crossPackageInvocations = { <from,override> | <from,override> <- possiblePackagePrivateMethodInvocations, methodPackages[from] != methodPackages[override] }; 
@@ -245,8 +248,8 @@ public AnalysisResult getPrivatePackegeInvocations(M3 model, M3 completeModel)
         size(crossPackageInvocations),                      // project_crossPackage_packagePrivateCallInstances
         size(totalPackagePrivateClasses),                   // total_packagePrivateClassCount,
         size(totalPurePackagePrivateClasses),               // total_purePackagePrivateClassCount,
-        size(instantiatedPackagePrivateClasses),            // total_instantiatedPurePackagePrivateClasses
-        size(packagePrivateMethods)                         // total_packagePrivateMethodCount
+        size(totalLivePackagePrivateClasses),               // total_instantiatedPurePackagePrivateClasses
+        size(totalPackagePrivateMethods)                    // total_packagePrivateMethodCount
     >;
 }
 
